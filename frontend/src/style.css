@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+ * 设计系统 —— 现代 SaaS 风（Linear / Vercel / Stripe Dashboard 一路）
+ *
+ * 分层原则：
+ *   页面底色  zinc-50        （灰纸感，让白卡片浮出来）
+ *   卡片      white + zinc-200 细边框 + rounded-xl，不用重阴影
+ *   文字层级  zinc-900 → zinc-500 → zinc-400（靠字重与灰度，不靠字号乱跳）
+ *   强调      zinc-900 主按钮；语义色只给状态（emerald 正常 / amber 警告 /
+ *             red 危急 / blue 信息），别把面板搞花
+ *   数字      .tnum 等宽字形 —— 读数跳动时不会左右晃
+ */
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background-color: var(--color-zinc-50);
+  color: var(--color-zinc-900);
+}
+
+/* 数字用等宽字形，读数跳动时不会左右晃 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 统一焦点环：键盘导航时才显示，鼠标点击不闪 */
+:focus-visible {
+  outline: 2px solid var(--color-zinc-900);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* 细滚动条 —— 监控面板常驻屏幕，粗滚动条很破坏质感 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-zinc-300) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-zinc-300);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-zinc-400);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::selection {
+  background: var(--color-zinc-900);
+  color: white;
+}
