@@ -120,21 +120,39 @@ function dutyLabel(fan: FanInfo): string {
           </span>
         </div>
 
-        <!-- 归属行：这个风扇位被哪个源占着（编辑入口在上方分配面板） -->
+        <!-- 归属行：这个风扇位被谁占着、以及**现在是谁在定这个占空比** -->
         <div class="mt-1.5 flex flex-wrap items-center gap-2 pl-0.5 text-[11px]">
           <span class="text-zinc-400">散热源</span>
-          <span
-            v-if="fan.owner_key"
-            class="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10"
-          >
-            {{ fan.bound_detail || fan.owner_key }}
-          </span>
+
+          <!-- 已被程序接管 -->
+          <template v-if="fan.owner_key">
+            <!-- ⚠️ 自动调档 / 手动定速必须显式区分：同为 duty=70%，
+                 前者是程序按温度算的，后者是你拖滑块定的、不会随温度变化 -->
+            <span
+              class="rounded-full px-2 py-0.5 font-medium ring-1 ring-inset"
+              :class="
+                mode === 'manual'
+                  ? 'bg-amber-50 text-amber-800 ring-amber-600/20'
+                  : 'bg-blue-50 text-blue-700 ring-blue-600/10'
+              "
+            >
+              {{ mode === 'manual' ? '手动定速（不随温度变化）' : '自动调档（按温度曲线）' }}
+            </span>
+            <span
+              class="rounded-full bg-zinc-50 px-2 py-0.5 text-zinc-500 ring-1 ring-inset ring-zinc-200"
+            >
+              {{ fan.bound_detail || fan.owner_key }}
+            </span>
+          </template>
+
+          <!-- 未被接管 → BMC 自己的温度表在转 -->
           <span
             v-else
             class="rounded-full bg-zinc-50 px-2 py-0.5 text-zinc-400 ring-1 ring-inset ring-zinc-200"
           >
-            未分配 —— 由 BMC 自动
+            BMC 自动档（程序未接管 · 读不到 GPU 温度）
           </span>
+
           <span v-if="fan.temperature !== null" class="text-zinc-400 tnum">
             {{ fan.temperature.toFixed(1) }}°C
           </span>
@@ -149,7 +167,15 @@ function dutyLabel(fan: FanInfo): string {
       </li>
     </ul>
 
-    <p class="border-t border-zinc-100 px-4 py-2.5 text-[11px] text-zinc-400">
+    <p class="border-t border-zinc-100 px-4 py-2.5 text-[11px] leading-relaxed text-zinc-400">
+      <b class="text-zinc-500">三种「自动」别搞混：</b>
+      <span class="mx-1 rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">自动调档</span>
+      = 程序按 GPU 温度曲线算占空比，会随温度升降；
+      <span class="mx-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-800">手动定速</span>
+      = 占空比锁在你拖滑块定的值，温度再高也不提速；
+      <span class="mx-1 rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">BMC 自动档</span>
+      = 程序不接管，BMC 按主板自己的温度表转（它读不到 GPU）。
+      <br />
       「哪张卡用哪个风扇」在上方分配面板里设置（以 GPU 为主体挑风扇接口）
     </p>
   </section>

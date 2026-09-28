@@ -217,7 +217,9 @@ function reset() {
           <span>
             <span class="block text-xs font-medium text-zinc-900">控制总开关</span>
             <span class="mt-0.5 block text-[11px] text-zinc-400">
-              {{ draft.enabled ? '开启 —— 按曲线自动调档' : '关闭 —— 完全不碰风扇' }}
+              <!-- ⚠️ 这里别写「按曲线自动调档」——那是「控制模式」的事，
+                   两个概念都叫自动会把人绕晕 -->
+              {{ draft.enabled ? '程序接管风扇（怎么定速看下面的模式）' : '程序完全不碰，全部交回 BMC 自动档' }}
             </span>
           </span>
           <input
@@ -234,7 +236,11 @@ function reset() {
           <span>
             <span class="block text-xs font-medium text-zinc-900">控制模式</span>
             <span class="mt-0.5 block text-[11px] text-zinc-400">
-              {{ draft.mode === 'auto' ? '按曲线自动调档' : '滑块直控，不自动调档' }}
+              {{
+                draft.mode === 'auto'
+                  ? '自动调档：按温度曲线算占空比'
+                  : '手动定速：锁定你设的占空比，温度涨也不提速'
+              }}
             </span>
           </span>
           <select
@@ -242,8 +248,8 @@ function reset() {
             class="h-8 rounded-md border border-zinc-300 bg-white px-2 text-xs focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
             @change="touch"
           >
-            <option value="auto">自动</option>
-            <option value="manual">手动</option>
+            <option value="auto">自动调档</option>
+            <option value="manual">手动定速</option>
           </select>
         </label>
 

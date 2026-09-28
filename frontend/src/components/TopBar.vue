@@ -101,12 +101,12 @@ async function emergencyRestore() {
         :disabled="switching || !snapshot"
         :title="
           mode === 'auto'
-            ? '当前按曲线自动调档，点击改为手动'
-            : '当前手动固定占空比，点击改回自动'
+            ? '当前：程序按 GPU 温度曲线算占空比（会随温度升降）。点击改为手动定速'
+            : '当前：占空比锁定在手动设定的值，GPU 温度再高也不提速。点击改回自动调档'
         "
         @click="toggleMode"
       >
-        模式 · {{ mode === 'auto' ? '自动' : mode === 'manual' ? '手动' : '—' }}
+        {{ mode === 'auto' ? '自动调档' : mode === 'manual' ? '手动定速' : '—' }}
       </button>
 
       <!-- 紧急回落：安全方向操作，任何时候都该点得动 -->
