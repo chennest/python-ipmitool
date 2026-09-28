@@ -45,10 +45,17 @@ function syncFromProps(s: RuntimeSettings | null) {
   }
 }
 
-// 只在首次拿到数据时同步，避免用户在编辑时被 2 秒一次的推送冲掉
-watch(() => props.settings, (s) => { if (!draft.value) syncFromProps(s) }, {
-  immediate: true,
-})
+// ⚠️ 只在没有未保存修改（dirty）时跟随快照同步 —— 用户编辑中不被
+// 2 秒一次的推送冲掉；但外部变化（顶栏切模式 / 别处改设置）必须反映
+// 进来，否则设置页显示旧值、用户一点保存就把旧值写回去覆盖外部操作
+// （2026-09-28 审计发现）。保存成功后 dirty=false，会自然回到跟随态。
+watch(
+  () => props.settings,
+  (s) => {
+    if (!dirty.value) syncFromProps(s)
+  },
+  { immediate: true },
+)
 
 const dirty = ref(false)
 function touch() {

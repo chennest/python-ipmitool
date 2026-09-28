@@ -281,6 +281,9 @@ class FanController:
 
             if kind not in ("gpu", "cpu"):
                 raise ValueError(f"不支持的源类型: {kind!r}（可选 gpu / cpu）")
+            if kind == "cpu" and key != "cpu":
+                # 不拦的话会产生「界面上不可见、却实际驱动风扇」的幽灵源
+                raise ValueError("kind=cpu 的源 key 必须是 'cpu'")
             if kind == "gpu":
                 uuid = item.get("gpu_uuid")
                 if not isinstance(uuid, str) or not uuid:
@@ -727,9 +730,13 @@ class FanController:
         语义（超哥 16:56 明确要求）：总开关开了，就该按曲线控制，
         而不是把风扇扔给读不到 GPU 温度的 BMC 自动档。
         """
-        temps = [g.temperature for g in gpus if g.temperature is not None]
+        temps = [
+            g.temperature
+            for g in gpus
+            if g.temperature is not None and self._is_managed(g.uuid)
+        ]
         if not temps:
-            self._handle_blind("兜底模式：GPU 指标里没有任何温度读数")
+            self._handle_blind("兜底模式：没有任何受管控 GPU 的温度读数")
             return
 
         hottest = max(temps)

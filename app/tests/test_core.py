@@ -609,6 +609,24 @@ class TestSourceAssignments(unittest.TestCase):
         self.assertEqual(rows[f"gpu:{self.GPU_A}"], ["FRNT_FAN1"])
         self.assertEqual(rows[f"gpu:{self.GPU_B}"], [])
 
+    def test_fallback_ignores_unmanaged_gpus(self) -> None:
+        """兜底模式只跟「受管控」的卡 —— 移出管控的卡不该驱动兜底风扇位。"""
+        c = self._controller()
+        # 只管 GPU_A；GPU_B 高温但已被移出管控
+        c.apply_settings({"control.managed_gpus": [self.GPU_A]})
+        updates = self._apply(
+            c, [self._gpu(self.GPU_A, 50.0), self._gpu(self.GPU_B, 90.0)]
+        )
+        # 兜底温度应取 A（50°C → 第一档 40%），而不是 B 的 90°C（会拉满）
+        self.assertEqual(updates["FRNT_FAN1"], 40)
+        self.assertEqual(updates["REAR_FAN2"], 40)
+
+    def test_cpu_key_must_be_canonical(self) -> None:
+        """kind=cpu 但 key 不是 'cpu' → 拒绝（防幽灵源）。"""
+        c = self._controller()
+        with self.assertRaises(ValueError):
+            c.update_assignments([{"key": "foo", "kind": "cpu", "slots": ["FRNT_FAN1"]}])
+
     def test_cpu_source_drives_tctl(self) -> None:
         c = self._controller()
         c.update_assignments([{"key": "cpu", "kind": "cpu", "slots": ["FRNT_FAN1"]}])

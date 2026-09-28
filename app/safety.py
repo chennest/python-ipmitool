@@ -115,6 +115,9 @@ class SafetyGuard:
 
         logger.warning("触发安全回退（原因: %s）", reason)
         self._ipmi.restore_auto(timeout=self._restore_timeout)
+        # 正常退出要清心跳 —— 否则看门狗 2 分钟后会对着过期心跳做一次
+        # 多余的回落，还留下「服务卡死」的误导日志（2026-09-28 审计发现）
+        self.clear_heartbeat()
 
     # ------------------------------------------------------------ 信号处理
 

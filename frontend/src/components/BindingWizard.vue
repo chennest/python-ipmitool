@@ -18,10 +18,13 @@ const selection = reactive<Record<string, string>>({})
 /**
  * ⚠️ 只在「分配内容真正变化」时才重建 selection —— WS 每 2 秒推一次快照，
  * 数组每次都是新对象；如果直接 watch 数组引用，用户正在下拉框里选的值
- * 会被 2 秒后的推送冲掉。
+ * 会被 2 秒后的推送冲掉。managed 也要进签名：设置页取消管控后，
+ * 该行要立即清掉残留的旧选择（审计发现）。
  */
 const assignmentSignature = computed(() =>
-  props.assignments.map((a) => `${a.key}=${a.slots.join(',')}`).join('|'),
+  props.assignments
+    .map((a) => `${a.key}=${a.managed ? 1 : 0}:${a.slots.join(',')}`)
+    .join('|'),
 )
 watch(assignmentSignature, () => {
   for (const key of Object.keys(selection)) delete selection[key]
