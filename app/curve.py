@@ -28,6 +28,17 @@ from typing import Iterable, Sequence
 logger = logging.getLogger(__name__)
 
 
+#: 折点温度的合理上限。GPU 超过 110°C 基本已经触发硬件保护，
+#: 再往上填没有意义，多半是手滑多打了一个 0。
+MAX_TEMP = 125.0
+
+#: 滞回带上限。带太宽（比如 30°C）等于「降温永不降档」，风扇会一直顶着高档转。
+MAX_HYSTERESIS = 20.0
+
+#: 预览采样的点数上限（防前端传极小步长把响应撑爆）
+MAX_SAMPLES = 500
+
+
 @dataclass(frozen=True)
 class CurvePoint:
     """曲线上的一个折点：温度达到 ``temp`` 时用 ``duty``。"""
@@ -36,8 +47,12 @@ class CurvePoint:
     duty: int
 
     def __post_init__(self) -> None:
+        if not 0 <= self.temp <= MAX_TEMP:
+            raise ValueError(f"折点温度需在 0~{MAX_TEMP:g}°C 之间，收到 {self.temp}°C")
         if not 1 <= self.duty <= 100:
             raise ValueError(f"占空比需在 1~100 之间，收到 {self.duty}")
+
+
 
 
 @dataclass
@@ -77,10 +92,25 @@ class FanCurve:
         ordered = sorted(points, key=lambda p: p.temp)
         for prev, curr in zip(ordered, ordered[1:]):
             if prev.temp == curr.temp:
-                raise ValueError(f"曲线折点温度重复: {curr.temp}°C")
+                raise ValueError(f"曲线折点温度重复: {curr.temp:g}°C")
+
+        # 上下限必须自身合法且有序 —— 否则钳制表达式 max(min, min(max, duty))
+        # 会退化成「永远给下限」，界面上怎么改折点都没反应
+        if not 1 <= min_duty <= 100:
+            raise ValueError(f"占空比下限需在 1~100 之间，收到 {min_duty}")
+        if not 1 <= max_duty <= 100:
+            raise ValueError(f"占空比上限需在 1~100 之间，收到 {max_duty}")
+        if min_duty > max_duty:
+            raise ValueError(
+                f"占空比下限（{min_duty}%）不能高于上限（{max_duty}%）"
+            )
+        if not 0 <= hysteresis <= MAX_HYSTERESIS:
+            raise ValueError(
+                f"滞回带需在 0~{MAX_HYSTERESIS:g}°C 之间，收到 {hysteresis}°C"
+            )
 
         self._points: tuple[CurvePoint, ...] = tuple(ordered)
-        self.hysteresis = max(0.0, hysteresis)
+        self.hysteresis = hysteresis
         self.min_duty = min_duty
         self.max_duty = max_duty
 
@@ -148,6 +178,27 @@ class FanCurve:
         duty = self._points[self._index_for(temp)].duty
         return max(self.min_duty, min(self.max_duty, duty))
 
+    def sample(
+        self, t_from: float, t_to: float, step: float = 1.0
+    ) -> list[dict[str, float]]:
+        """按温度区间采样出一串 ``{temp, duty}``，供前端画预览图。
+
+        **为什么由后端算而不是前端照着公式自己画**：阶梯语义 + 上下限钳制
+        这套逻辑只有一份实现才不会漂移。前端拿到的就是控制器真正会下发的值。
+        """
+        if step <= 0:
+            raise ValueError(f"采样步长必须为正数，收到 {step}")
+        if t_to < t_from:
+            raise ValueError(f"采样区间终点（{t_to:g}）不能小于起点（{t_from:g}）")
+
+        out: list[dict[str, float]] = []
+        temp = t_from
+        # 上限兜底：前端传个 step=0.01 会把响应撑爆
+        while temp <= t_to + 1e-9 and len(out) < MAX_SAMPLES:
+            out.append({"temp": round(temp, 2), "duty": self.duty_at(temp)})
+            temp += step
+        return out
+
     def describe(self) -> dict:
         """序列化给前端展示。"""
         return {
@@ -159,6 +210,19 @@ class FanCurve:
 
 
 def build_curve_from_config(raw_points: Iterable[dict], **kwargs) -> FanCurve:
-    """从配置里的一串 ``{"temp": .., "duty": ..}`` 构造曲线。"""
-    points = [CurvePoint(float(p["temp"]), int(p["duty"])) for p in raw_points]
+    """从配置里的一串 ``{"temp": .., "duty": ..}`` 构造曲线。
+
+    逐个显式转成数字而不是直接 ``int(...)`` —— 后者会把 70.5 静默砍成 70，
+    界面上看着填了 70.5 实际生效的是 70，排障时很难发现。
+    """
+    points: list[CurvePoint] = []
+    for raw in raw_points:
+        try:
+            temp = float(raw["temp"])
+            duty = float(raw["duty"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"曲线折点格式不对：{raw!r}") from exc
+        if not float(duty).is_integer():
+            raise ValueError(f"占空比必须是整数百分比，收到 {duty:g}")
+        points.append(CurvePoint(temp, int(duty)))
     return FanCurve(points, **kwargs)

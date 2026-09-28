@@ -1,5 +1,7 @@
 import type {
   AssignmentItem,
+  CurvePoint,
+  CurvePreviewResponse,
   HistoryResponse,
   RuntimeSettings,
   SettingsPatch,
@@ -55,6 +57,27 @@ export const api = {
     request<{ ok: boolean; assignments: AssignmentItem[] }>('/api/assignments', {
       method: 'PUT',
       body: JSON.stringify({ assignments }),
+    }),
+
+  /**
+   * 试算一条**还没保存**的曲线。
+   *
+   * 走后端真实算法（阶梯语义 + 上下限钳制），保证「预览到的」就是「保存后会跑的」。
+   * 顺带承担校验：折点温度重复 / 占空比越界 / 上下限倒置都会撞成 400，
+   * 错误信息就是 ``detail`` 原文，可以直接显示给用户。
+   */
+  previewCurve: (payload: {
+    points: CurvePoint[]
+    hysteresis: number
+    min_duty: number
+    max_duty: number
+    from: number
+    to: number
+    step: number
+  }) =>
+    request<CurvePreviewResponse>('/api/curve/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 
   /** 操作审计（IPMI 写入 / API 调用 / 启停） */

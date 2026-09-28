@@ -20,7 +20,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.curve import CurvePoint, CurveState, FanCurve  # noqa: E402
+from app.curve import (  # noqa: E402
+    CurvePoint,
+    CurveState,
+    FanCurve,
+    build_curve_from_config,
+)
 from app.ipmi import (  # noqa: E402
     FAN_SLOT_INDEX,
     PAYLOAD_LEN,
@@ -219,6 +224,118 @@ class TestFanCurve(unittest.TestCase):
         state.reset()
         self.assertIsNone(state.index)
 
+    def test_below_first_point_uses_first_duty(self) -> None:
+        """语义锁定：低于最低折点时给的是**首档**，不是 min_duty。
+
+        这条很容易被误读成「低温 → 下限」，界面上必须写清楚。
+        """
+        curve = FanCurve([CurvePoint(50, 70)], min_duty=30)
+        self.assertEqual(curve.duty_at(40), 70, "低温应给首档 70%，不是下限 30%")
+
+    def test_min_duty_above_max_is_rejected(self) -> None:
+        """上下限倒置会让钳制退化成常量（永远给下限），必须挡住。"""
+        with self.assertRaises(ValueError):
+            FanCurve([CurvePoint(50, 60)], min_duty=80, max_duty=40)
+
+    def test_duty_must_be_integer_percent(self) -> None:
+        """70.5 不能静默砍成 70 —— 要么报错，要么按 70.5 处理，不能装没看见。"""
+        with self.assertRaises(ValueError):
+            build_curve_from_config([{"temp": 50, "duty": 70.5}])
+
+    def test_temp_out_of_range_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            CurvePoint(500, 50)
+
+    def test_hysteresis_has_upper_bound(self) -> None:
+        """滞回带 50°C 等于「降温永不降档」，风扇会一直顶着高档转。"""
+        with self.assertRaises(ValueError):
+            FanCurve([CurvePoint(50, 60)], hysteresis=50)
+
+    def test_sample_follows_step_curve(self) -> None:
+        curve = FanCurve([CurvePoint(50, 40), CurvePoint(80, 85)], min_duty=30)
+        samples = {round(s["temp"]): s["duty"] for s in curve.sample(40, 80, 10)}
+        self.assertEqual(samples[40], 40)   # 低于首折点
+        self.assertEqual(samples[50], 40)   # 达到 50 → 首档
+        self.assertEqual(samples[70], 40)   # 还没到 80
+        self.assertEqual(samples[80], 85)   # 达到 80 → 升档
+
+    def test_sample_rejects_bad_range(self) -> None:
+        curve = FanCurve([CurvePoint(50, 40)])
+        with self.assertRaises(ValueError):
+            curve.sample(80, 40, 1)
+        with self.assertRaises(ValueError):
+            curve.sample(40, 80, 0)
+
+
+class TestCurvePreview(unittest.TestCase):
+    """「改着看」的曲线试算（preview_curve）—— 只读，不能污染运行状态。"""
+
+    def _controller(self):
+        return _make_controller()
+
+    def test_preview_matches_what_runtime_would_emit(self) -> None:
+        """预览出来的值 = 保存后真正会下发的值（同一套构造 + 钳制）。"""
+        c = self._controller()
+        payload = {
+            "points": [{"temp": 50, "duty": 40}, {"temp": 80, "duty": 85}],
+            "hysteresis": 3.0,
+            "min_duty": 30,
+            "max_duty": 100,
+            "from": 40,
+            "to": 80,
+            "step": 10,
+        }
+        preview = {
+            round(s["temp"]): s["duty"] for s in c.preview_curve(payload)["samples"]
+        }
+
+        # 同一条曲线真正落进去，逐点比对
+        c.apply_settings({"curve": payload})
+        for temp, duty in preview.items():
+            self.assertEqual(
+                c._curve.duty_at(float(temp)), duty, f"{temp}°C 预览与实跑不一致"
+            )
+
+    def test_preview_does_not_touch_runtime_curve(self) -> None:
+        """预览是「改着看」—— 没点保存就不能改到正在跑的曲线。"""
+        c = self._controller()
+        before = c._curve.describe()
+        c.preview_curve(
+            {"points": [{"temp": 30, "duty": 10}], "from": 30, "to": 60, "step": 10}
+        )
+        self.assertEqual(c._curve.describe(), before)
+
+    def test_preview_rejects_bad_draft(self) -> None:
+        """草稿非法就在试算阶段撞出来，别等点保存才 400。"""
+        c = self._controller()
+        for bad in (
+            {"points": []},                                        # 空曲线
+            {"points": [{"temp": 50, "duty": 40}, {"temp": 50, "duty": 60}]},  # 温度重复
+            {"points": [{"temp": 50, "duty": 0}]},                 # 占空比越界
+            {"points": [{"temp": 50, "duty": 40}], "min_duty": 90, "max_duty": 50},
+        ):
+            with self.assertRaises(ValueError):
+                c.preview_curve(bad)
+
+    def test_emergency_resume_must_be_below_trigger(self) -> None:
+        """解除 ≥ 触发会让紧急状态一进就出，风扇 100% ↔ 曲线档反复横跳。"""
+        c = self._controller()
+        before = (c._emergency_temp, c._emergency_resume)
+        with self.assertRaises(ValueError):
+            c.apply_settings(
+                {"safety.emergency_temp": 70.0, "safety.emergency_resume_temp": 80.0}
+            )
+        # 校验失败不能留下改了一半的状态
+        self.assertEqual((c._emergency_temp, c._emergency_resume), before)
+
+    def test_emergency_thresholds_accept_valid_pair(self) -> None:
+        c = self._controller()
+        c.apply_settings(
+            {"safety.emergency_temp": 88.0, "safety.emergency_resume_temp": 78.0}
+        )
+        self.assertEqual(c._emergency_temp, 88.0)
+        self.assertEqual(c._emergency_resume, 78.0)
+
 
 class TestPrometheusParsing(unittest.TestCase):
     """Prometheus 文本解析 —— 用 pve02 上抓到的真实格式。"""
@@ -385,6 +502,37 @@ FRNT_FAN1_2      | 6Ah | ns  |  7.0 | No Reading
         self.assertEqual(readings["REAR_FAN1"].rpm, 400.0)
 
 
+def _make_controller():
+    """构造一个最小可用的控制器（mock 掉 IPMI / 传感器）。
+
+    抽成模块级函数 —— 曲线试算那组测试也要用，不复制一遍。
+    """
+    from app.config import AppConfig, FanBinding
+    from app.controller import FanController
+    from app.curve import build_curve_from_config
+    from app.ipmi import IPMIClient
+    from app.safety import SafetyGuard
+    from app.sensors import FanMetricsReader, GPUMetricsReader
+
+    # 配置里显式预置两个位（模拟 config.yaml 占位；探测路径另有专项测试）
+    config = AppConfig(fans=[FanBinding(slot="FRNT_FAN1"), FanBinding(slot="REAR_FAN2")])
+    ipmi = mock.MagicMock(spec=IPMIClient)
+    guard = mock.MagicMock(spec=SafetyGuard)
+    guard.engaged = False
+    gpu_reader = mock.MagicMock(spec=GPUMetricsReader)
+    fan_reader = mock.MagicMock(spec=FanMetricsReader)
+    # last_source 是实例属性（reader.read() 时才赋值），spec 的 Mock 上没有
+    gpu_reader.last_source = "test"
+    fan_reader.last_source = "test"
+    curve = build_curve_from_config(
+        [
+            {"temp": 45, "duty": 40},
+            {"temp": 75, "duty": 80},
+        ]
+    )
+    return FanController(config, ipmi, guard, gpu_reader, fan_reader, curve)
+
+
 class TestSourceAssignments(unittest.TestCase):
     """「散热源 → 风扇位」分配模型（2026-09-28 倒置：GPU 是主体）。
 
@@ -397,32 +545,7 @@ class TestSourceAssignments(unittest.TestCase):
     GPU_B = "GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"
 
     def _controller(self):
-        from app.config import AppConfig, FanBinding
-        from app.controller import FanController
-        from app.curve import build_curve_from_config
-        from app.ipmi import IPMIClient
-        from app.safety import SafetyGuard
-        from app.sensors import FanMetricsReader, GPUMetricsReader
-
-        # 配置里显式预置两个位（模拟 config.yaml 占位；探测路径另有专项测试）
-        config = AppConfig(
-            fans=[FanBinding(slot="FRNT_FAN1"), FanBinding(slot="REAR_FAN2")]
-        )
-        ipmi = mock.MagicMock(spec=IPMIClient)
-        guard = mock.MagicMock(spec=SafetyGuard)
-        guard.engaged = False
-        gpu_reader = mock.MagicMock(spec=GPUMetricsReader)
-        fan_reader = mock.MagicMock(spec=FanMetricsReader)
-        # last_source 是实例属性（reader.read() 时才赋值），spec 的 Mock 上没有
-        gpu_reader.last_source = "test"
-        fan_reader.last_source = "test"
-        curve = build_curve_from_config(
-            [
-                {"temp": 45, "duty": 40},
-                {"temp": 75, "duty": 80},
-            ]
-        )
-        return FanController(config, ipmi, guard, gpu_reader, fan_reader, curve)
+        return _make_controller()
 
     @staticmethod
     def _gpu(uuid: str, temp: float):

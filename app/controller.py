@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import AppConfig
-from .curve import CurveState, FanCurve, build_curve_from_config
+from .curve import MAX_TEMP, CurveState, FanCurve, build_curve_from_config
 from .ipmi import FAN_SLOT_INDEX, GPU_COOLING_SLOTS, IPMIClient
 from .safety import SafetyGuard
 from .sensors import (
@@ -434,10 +434,27 @@ class FanController:
                 state.reset()
             logger.info("控制曲线已更新（%d 个折点）", len(points))
 
-        if "safety.emergency_temp" in settings:
-            self._emergency_temp = float(settings["safety.emergency_temp"])
-        if "safety.emergency_resume_temp" in settings:
-            self._emergency_resume = float(settings["safety.emergency_resume_temp"])
+        # ⚠️ 两个阈值必须**一起**校验：解除温度 ≥ 触发温度的话，会陷入
+        # 「一进紧急立刻解除 → 温度又上来 → 再进」的抖动脉冲（见
+        # _update_emergency）。先算出新值、校验通过再落，避免改了一半被拒。
+        if "safety.emergency_temp" in settings or "safety.emergency_resume_temp" in settings:
+            new_trigger = (
+                float(settings["safety.emergency_temp"])
+                if "safety.emergency_temp" in settings
+                else self._emergency_temp
+            )
+            new_resume = (
+                float(settings["safety.emergency_resume_temp"])
+                if "safety.emergency_resume_temp" in settings
+                else self._emergency_resume
+            )
+            if not 0 < new_resume < new_trigger <= MAX_TEMP:
+                raise ValueError(
+                    f"紧急阈值需满足 0 < 解除（{new_resume:g}°C）"
+                    f" < 触发（{new_trigger:g}°C）≤ {MAX_TEMP:g}°C"
+                )
+            self._emergency_temp = new_trigger
+            self._emergency_resume = new_resume
 
         if "control.managed_gpus" in settings:
             value = settings["control.managed_gpus"]
@@ -468,6 +485,39 @@ class FanController:
                     )
                     a.slots = []
             self._reindex()
+
+    def preview_curve(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """试算一条**尚未保存**的曲线，返回采样点给前端画预览图。
+
+        为什么不塞进 ``apply_settings``：预览是「改着看」的，每敲一个数字就
+        来一次；真落盘必须等用户点保存。这条路径只读不写，
+        ``self._curve`` 和所有 ``CurveState`` 都不受影响。
+
+        复用 ``build_curve_from_config`` + ``FanCurve.sample`` 的完整链路 ——
+        校验规则和真实曲线完全同一套，界面上预览到的就是保存后会跑的。
+        """
+        raw = payload or {}
+        points = raw.get("points") or []
+        if not points:
+            raise ValueError("曲线至少要有一个折点")
+
+        curve = build_curve_from_config(
+            points,
+            hysteresis=float(raw.get("hysteresis", 3.0)),
+            min_duty=int(raw.get("min_duty", 20)),
+            max_duty=int(raw.get("max_duty", 100)),
+        )
+        return {
+            "points": [{"temp": p.temp, "duty": p.duty} for p in curve.points],
+            "hysteresis": curve.hysteresis,
+            "min_duty": curve.min_duty,
+            "max_duty": curve.max_duty,
+            "samples": curve.sample(
+                float(raw.get("from", 30.0)),
+                float(raw.get("to", 100.0)),
+                float(raw.get("step", 1.0)),
+            ),
+        }
 
     def export_settings(self) -> dict[str, Any]:
         """导出当前运行时设置（供持久化到 SQLite / 给前端展示）。"""

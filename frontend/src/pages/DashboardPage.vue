@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import GpuCards from '../components/GpuCards.vue'
 import TemperaturePanel from '../components/TemperaturePanel.vue'
-import TrendChart from '../components/TrendChart.vue'
+import TrendPanel from '../components/TrendPanel.vue'
 import type { AssignmentItem, StatusSnapshot } from '../types'
 
 defineProps<{
@@ -14,6 +14,6 @@ defineProps<{
   <div class="space-y-4">
     <GpuCards :gpus="snapshot?.gpus ?? []" :assignments="assignments" />
     <TemperaturePanel :temperatures="snapshot?.temperatures ?? null" />
-    <TrendChart />
+    <TrendPanel />
   </div>
 </template>

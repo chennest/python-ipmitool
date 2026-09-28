@@ -4,6 +4,8 @@ import { LineChart } from 'echarts/charts'
 import {
   GridComponent,
   LegendComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
   MarkPointComponent,
   TooltipComponent,
 } from 'echarts/components'
@@ -15,6 +17,8 @@ echarts.use([
   GridComponent,
   LegendComponent,
   MarkPointComponent,
+  MarkLineComponent,
+  MarkAreaComponent,
   TooltipComponent,
   CanvasRenderer,
 ])

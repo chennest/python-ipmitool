@@ -187,6 +187,54 @@ class SettingsPatch(BaseModel):
     )
 
 
+class CurvePreviewPayload(BaseModel):
+    """曲线试算请求（**不落库** —— 纯粹是「改着看」）。
+
+    ``from`` 是 Python 关键字，字段用 ``from_`` + alias 收。
+    """
+
+    model_config = {"populate_by_name": True}
+
+    points: list[dict[str, Any]] = Field(
+        default_factory=list, description="折点 [{temp,duty}]"
+    )
+    hysteresis: float = Field(default=3.0, description="滞回带 °C")
+    min_duty: int = Field(default=20, description="占空比下限 %")
+    max_duty: int = Field(default=100, description="占空比上限 %")
+    from_: float = Field(default=30.0, alias="from", description="采样起点 °C")
+    to: float = Field(default=100.0, description="采样终点 °C")
+    step: float = Field(default=1.0, description="采样步长 °C")
+
+
+@router.post("/curve/preview", summary="试算一条曲线的输出（不落库）")
+async def curve_preview(
+    payload: CurvePreviewPayload, request: Request
+) -> dict[str, Any]:
+    """用**真实的控制器算法**算一遍还没保存的曲线，给前端画预览图。
+
+    之所以不让前端照着公式自己画：阶梯语义（温度要达到折点才升档）+ 上下限
+    钳制这套逻辑只有一份实现才不会漂移。后端算出来的就是保存后真正会下发的。
+
+    顺带承担校验职责 —— 折点温度重复 / 占空比越界 / 上下限倒置都会在这里
+    先撞成 400，界面上就能红出来，不用等点保存才报错。
+    """
+    controller = _controller(request)
+    try:
+        return controller.preview_curve(
+            {
+                "points": payload.points,
+                "hysteresis": payload.hysteresis,
+                "min_duty": payload.min_duty,
+                "max_duty": payload.max_duty,
+                "from": payload.from_,
+                "to": payload.to,
+                "step": payload.step,
+            }
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/settings", summary="读取运行时设置")
 async def get_settings(request: Request) -> dict[str, Any]:
     """当前生效的设置。

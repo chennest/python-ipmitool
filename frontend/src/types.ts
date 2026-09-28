@@ -78,6 +78,19 @@ export interface CurveInfo {
   max_duty: number
 }
 
+/**
+ * 曲线试算结果（**不落库** —— 纯粹是「改着看」）。
+ * samples 由后端用真实控制器算法算出来，前端照着画就不会和实跑漂移。
+ */
+export interface CurvePreviewResponse {
+  points: CurvePoint[]
+  hysteresis: number
+  min_duty: number
+  max_duty: number
+  /** [{temp, duty}] —— 已含阶梯语义与上下限钳制 */
+  samples: { temp: number; duty: number }[]
+}
+
 /** CPU 核心温度（node_exporter 的 hwmon）：Tctl / Tccd* */
 export interface CPUCoreTemp {
   label: string
@@ -177,4 +190,6 @@ export interface HistorySeriesItem {
 export interface HistoryResponse {
   minutes: number
   series: HistorySeriesItem[]
+  /** 后端附带的说明（比如未配置 Prometheus 时），有值就直接显示在标题下 */
+  note?: string
 }

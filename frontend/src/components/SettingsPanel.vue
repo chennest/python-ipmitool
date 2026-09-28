@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
+import CurveEditor from './CurveEditor.vue'
 import type { CurvePoint, GpuInfo, RuntimeSettings, SettingsPatch } from '../types'
 
 const props = defineProps<{
@@ -62,21 +63,12 @@ function touch() {
   dirty.value = true
 }
 
-function addPoint() {
-  if (!draft.value) return
-  const pts = draft.value.points
-  const last = pts.length ? pts[pts.length - 1] : { temp: 60, duty: 50 }
-  pts.push({ temp: Math.min(110, last.temp + 10), duty: Math.min(100, last.duty + 15) })
-  touch()
-}
+/** 曲线编辑器回报的合法性 —— 有硬错误就别让用户点保存（点了也是 400） */
+const curveValid = ref(true)
 
-function removePoint(i: number) {
-  if (!draft.value || draft.value.points.length <= 1) return
-  draft.value.points.splice(i, 1)
-  touch()
-}
-
-const canSave = computed(() => draft.value !== null && dirty.value && !saving.value)
+const canSave = computed(
+  () => draft.value !== null && dirty.value && !saving.value && curveValid.value,
+)
 
 /** 是否全部已知 GPU 都被勾选（决定保存成 [] 还是显式列表） */
 const allManaged = computed(() => {
@@ -271,92 +263,19 @@ function reset() {
         </label>
       </div>
 
-      <!-- 曲线 -->
+      <!-- 曲线：编辑器自带实时预览图 + 行内校验（数据走后端试算接口，
+           保证「预览到的」就是「保存后会跑的」） -->
       <div class="p-4">
-        <div class="mb-3 flex items-baseline gap-2">
-          <h3 class="text-xs font-semibold text-zinc-900">温度 → 占空比曲线</h3>
-          <span class="text-[11px] text-zinc-400">
-            温度<b>达到</b>折点才升档；降温要跌出滞回带才降档
-          </span>
-        </div>
-
-        <div class="space-y-1.5">
-          <div
-            v-for="(p, i) in draft.points"
-            :key="i"
-            class="flex items-center gap-2 text-xs"
-          >
-            <span class="w-5 text-center text-[11px] text-zinc-300">{{ i + 1 }}</span>
-            <input
-              v-model.number="p.temp"
-              type="number"
-              class="h-8 w-20 rounded-md border border-zinc-300 px-2 tnum focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-              @change="touch"
-            />
-            <span class="text-zinc-400">°C →</span>
-            <input
-              v-model.number="p.duty"
-              type="number"
-              min="0"
-              max="100"
-              class="h-8 w-20 rounded-md border border-zinc-300 px-2 tnum focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-              @change="touch"
-            />
-            <span class="text-zinc-400">%</span>
-            <button
-              class="ml-auto rounded-md px-2 py-1 text-[11px] font-medium text-zinc-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
-              :disabled="draft.points.length <= 1"
-              @click="removePoint(i)"
-            >
-              删除
-            </button>
-          </div>
-        </div>
-
-        <button
-          class="mt-2.5 rounded-md border border-dashed border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-900"
-          @click="addPoint"
-        >
-          + 加折点
-        </button>
-
-        <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-          <label class="flex items-center gap-2">
-            <span class="text-zinc-500">滞回带</span>
-            <input
-              v-model.number="draft.hysteresis"
-              type="number"
-              min="0"
-              class="h-8 w-16 rounded-md border border-zinc-300 px-2 tnum focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-              @change="touch"
-            />
-            <span class="text-zinc-400">°C</span>
-          </label>
-          <label class="flex items-center gap-2">
-            <span class="text-zinc-500">占空比下限</span>
-            <input
-              v-model.number="draft.minDuty"
-              type="number"
-              min="1"
-              max="100"
-              class="h-8 w-16 rounded-md border border-zinc-300 px-2 tnum focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-              @change="touch"
-            />
-            <span class="text-zinc-400">%</span>
-          </label>
-          <label class="flex items-center gap-2">
-            <span class="text-zinc-500">上限</span>
-            <input
-              v-model.number="draft.maxDuty"
-              type="number"
-              min="1"
-              max="100"
-              class="h-8 w-16 rounded-md border border-zinc-300 px-2 tnum focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-              @change="touch"
-            />
-            <span class="text-zinc-400">%</span>
-          </label>
-        </div>
+        <CurveEditor
+          v-model:points="draft.points"
+          v-model:hysteresis="draft.hysteresis"
+          v-model:minDuty="draft.minDuty"
+          v-model:maxDuty="draft.maxDuty"
+          :gpus="gpus"
+          :emergency-temp="draft.emergencyTemp"
+          @change="touch"
+          @validity="curveValid = $event"
+        />
       </div>
 
       <!-- 安全阈值 -->
