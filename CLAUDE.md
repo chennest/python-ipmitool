@@ -210,3 +210,16 @@ servers:
 | Dell | 730XD | `dell730` |
 | Dell | 730 | `dell730` |
 | ASRock Rack | EPYCD8 | `epycd8` |
+
+---
+
+## 新控制台（`app/` + `frontend/`）与部署
+
+上面的内容是**上游遗留**的 `fancontroller.py` 那套（Dell 730 为主，CPU 温度控速）。
+
+本仓库真正在用的是 `app/`（FastAPI 控制台）+ `frontend/`（Vue3 前端）：
+
+- 控速依据是 **GPU 温度**（DCGM），目标机 pve02 的机箱风扇，写 `ipmitool raw 0x3a 0x01`
+- 运行时状态（模式 / 管控 GPU / 分配关系 / 审计）**全部落 SQLite**，配置文件只是首次运行的种子
+- 部署方式、踩坑、回滚、验证清单 → **见 [`DEPLOY.md`](./DEPLOY.md)**，一键脚本 `./deploy.sh`
+
