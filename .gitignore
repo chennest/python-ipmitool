@@ -1,3 +1,13 @@
+# 本地工作数据（WorkBuddy 记忆目录与 agent-ssh-cli 锁文件），不进版本库
+.workbuddy/
+agent-ssh-cli-*.lock
+
+# 运行时数据：SQLite 库（绑定 + 审计）、心跳文件等，属于机器本地状态
+app/data/
+
+# 前端构建产物：由 frontend/ 构建生成（npm run build），不进版本库
+app/static/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

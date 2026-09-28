@@ -1,0 +1,28 @@
+[Unit]
+Description=GPU Fan Console (pve02 GPU 温度联动风扇控制台)
+Documentation=https://github.com/chennest/python-ipmitool
+# docker 起来是为了让 dcgm-exporter / ipmi_exporter 先就绪；
+# 但即使它们没起来，本服务也能跑（会降级到 nvidia-smi 兜底）。
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 本地 in-band 读写 /dev/ipmi0 需要 root
+User=root
+WorkingDirectory=/opt/gpu-fan-console
+ExecStart=/opt/gpu-fan-console/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8765
+
+Restart=always
+RestartSec=5
+
+# 停止时给足时间执行「回退 BMC 自动控制」——这是本服务最重要的退出动作
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gpu-fan-console
+
+[Install]
+WantedBy=multi-user.target

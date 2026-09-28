@@ -1,0 +1,12 @@
+[Unit]
+Description=定时触发 GPU 风扇看门狗心跳检查
+
+[Timer]
+# 开机 3 分钟后开始第一次检查（给主服务留出启动时间）
+OnBootSec=3min
+# 之后每 2 分钟一次
+OnUnitActiveSec=2min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

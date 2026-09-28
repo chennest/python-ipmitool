@@ -1,0 +1,8 @@
+[Unit]
+Description=GPU Fan Console 心跳看门狗（单次执行）
+# 独立于主服务：主服务卡死或被强杀时它才能救场
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gpu-fan-console/app/deploy/fan-watchdog.sh
