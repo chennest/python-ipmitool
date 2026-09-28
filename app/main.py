@@ -100,8 +100,11 @@ async def lifespan(app: FastAPI):
         store=store,
     )
 
-    # 运行时设置：数据库里的值优先于配置文件（同样是单一数据源）。
-    # ⚠️ **必须先于分配恢复** —— 管控范围（managed_gpus）是分配校验的前提，
+    # 运行时设置：**SQLite 是唯一权威**，config.yaml 只充当首次初始化的种子。
+    # 启动时先应用库里已有的键，再把最终生效值**全量回写**——
+    # 这样任何运行时状态（开关/模式/周期/曲线/阈值/管控范围）重启后都从库恢复，
+    # 不存在「回退到配置文件」的暗路径（超哥 20:19 明确要求）。
+    # ⚠️ 这一段必须先于分配恢复 —— 管控范围（managed_gpus）是分配校验的前提，
     #    顺序反了的话，未管控卡的存量分配会把整份恢复作废（16:56 事故根因之一）。
     stored_settings = store.load_settings()
     if stored_settings:
@@ -111,7 +114,16 @@ async def lifespan(app: FastAPI):
                 "已应用数据库里的运行时设置: %s", ", ".join(sorted(stored_settings))
             )
         except (ValueError, TypeError) as exc:
-            logger.error("数据库里的设置无效（%s）—— 沿用配置文件里的值", exc)
+            logger.error("数据库里的设置无效（%s）—— 缺失的键用配置文件种子补齐", exc)
+    try:
+        # 库里没有的键（首次启动 / 新增设置项）由配置文件种子补上并落库
+        seed = controller.export_settings()
+        store.save_settings(seed)
+        newly = sorted(set(seed) - set(stored_settings or {}))
+        if newly:
+            logger.info("设置项首次落库（来自配置文件种子）: %s", ", ".join(newly))
+    except Exception:  # noqa: BLE001 - 回写失败不影响启动
+        logger.exception("设置回写 SQLite 失败")
 
     # 「散热源 → 风扇位」的分配以数据库为**唯一权威**（配置文件只声明管控哪些位）。
     #

@@ -101,6 +101,8 @@ export interface TemperatureInfo {
 export interface RuntimeSettings {
   'control.enabled': boolean
   'control.interval': number
+  /** 控制模式：auto=按曲线调档；manual=滑块直控。持久化到 SQLite */
+  'control.mode': 'auto' | 'manual'
   /** 管控的 GPU UUID 列表；空数组 = 全部管控（保守默认） */
   'control.managed_gpus': string[]
   curve: CurveInfo
@@ -112,6 +114,7 @@ export interface RuntimeSettings {
 export interface SettingsPatch {
   control_enabled?: boolean
   control_interval?: number
+  control_mode?: 'auto' | 'manual'
   managed_gpus?: string[]
   curve?: CurveInfo
   emergency_temp?: number

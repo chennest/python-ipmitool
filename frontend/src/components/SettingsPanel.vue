@@ -16,6 +16,7 @@ const error = ref<string | null>(null)
 /** 本地草稿：整份设置的可编辑副本 */
 const draft = ref<{
   enabled: boolean
+  mode: 'auto' | 'manual'
   interval: number
   managedGpus: string[]
   points: CurvePoint[]
@@ -31,6 +32,7 @@ function syncFromProps(s: RuntimeSettings | null) {
   const stored = s['control.managed_gpus'] ?? []
   draft.value = {
     enabled: s['control.enabled'],
+    mode: s['control.mode'] ?? 'auto',
     interval: s['control.interval'],
     // 空列表语义 = 「全部管控」—— UI 上显示为全部勾选，保存时再还原成 []
     managedGpus: stored.length ? [...stored] : props.gpus.map((g) => g.uuid),
@@ -98,6 +100,7 @@ async function save() {
       props.gpus.every((g) => draft.value!.managedGpus.includes(g.uuid))
     const patch: SettingsPatch = {
       control_enabled: draft.value.enabled,
+      control_mode: draft.value.mode,
       control_interval: draft.value.interval,
       managed_gpus: allSelected ? [] : draft.value.managedGpus,
       curve: {
@@ -199,8 +202,8 @@ function reset() {
         </p>
       </div>
 
-      <!-- 控制开关与周期 -->
-      <div class="grid gap-4 p-4 sm:grid-cols-2">
+      <!-- 控制开关 / 模式 / 周期 -->
+      <div class="grid gap-4 p-4 sm:grid-cols-3">
         <label
           class="flex cursor-pointer items-center justify-between rounded-lg border border-zinc-200 px-3 py-2.5 transition hover:border-zinc-300"
         >
@@ -216,6 +219,25 @@ function reset() {
             class="h-4 w-4 accent-zinc-900"
             @change="touch"
           />
+        </label>
+
+        <label
+          class="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2.5 transition hover:border-zinc-300"
+        >
+          <span>
+            <span class="block text-xs font-medium text-zinc-900">控制模式</span>
+            <span class="mt-0.5 block text-[11px] text-zinc-400">
+              {{ draft.mode === 'auto' ? '按曲线自动调档' : '滑块直控，不自动调档' }}
+            </span>
+          </span>
+          <select
+            v-model="draft.mode"
+            class="h-8 rounded-md border border-zinc-300 bg-white px-2 text-xs focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
+            @change="touch"
+          >
+            <option value="auto">自动</option>
+            <option value="manual">手动</option>
+          </select>
         </label>
 
         <label

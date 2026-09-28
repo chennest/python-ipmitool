@@ -165,6 +165,9 @@ class SettingsPatch(BaseModel):
     control_interval: float | None = Field(
         default=None, gt=0, le=3600, description="控制周期（秒）"
     )
+    control_mode: Literal["auto", "manual"] | None = Field(
+        default=None, description="控制模式：auto=按曲线调档；manual=滑块直控"
+    )
     curve: dict[str, Any] | None = Field(
         default=None,
         description="整条曲线 {points:[{temp,duty}], hysteresis, min_duty, max_duty}",
@@ -211,6 +214,8 @@ async def patch_settings(
         patch["control.enabled"] = payload.control_enabled
     if payload.control_interval is not None:
         patch["control.interval"] = payload.control_interval
+    if payload.control_mode is not None:
+        patch["control.mode"] = payload.control_mode
     if payload.curve is not None:
         patch["curve"] = payload.curve
     if payload.emergency_temp is not None:
@@ -359,10 +364,13 @@ async def history(
 @router.post("/mode", summary="切换控制模式")
 async def set_mode(payload: ModeRequest, request: Request) -> dict[str, Any]:
     controller = _controller(request)
+    store = getattr(request.app.state, "store", None)
     try:
         controller.set_mode(payload.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if store is not None:
+        store.log("api_call", "api", f"切换控制模式 → {payload.mode}")
     return {"ok": True, "mode": controller.mode}
 
 

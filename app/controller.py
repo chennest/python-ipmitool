@@ -221,10 +221,21 @@ class FanController:
     # ------------------------------------------------------------ 模式切换
 
     def set_mode(self, mode: str) -> None:
-        """切换 ``auto`` / ``manual``。
+        """切换 ``auto`` / ``manual`` 并**持久化到 SQLite**。
 
         切回 ``auto`` 时重置曲线状态，避免拿着旧的档位索引做滞回判断。
         """
+        self._switch_mode(mode)
+        # 模式是运行时状态，必须扛得住重启 —— 否则重启后静默变回 auto，
+        # 控制器突然开始按曲线调档，风扇行为突变（超哥 20:19 指出）
+        if self._store is not None:
+            try:
+                self._store.save_settings({"control.mode": mode})
+            except Exception:  # noqa: BLE001 - 持久化失败不该影响切换本身
+                logger.exception("模式已切换，但持久化失败（重启后会回到旧值）")
+
+    def _switch_mode(self, mode: str) -> None:
+        """纯内存的模式切换（:meth:`apply_settings` 启动恢复时复用，不落库）。"""
         if mode not in ("auto", "manual"):
             raise ValueError(f"不支持的模式: {mode!r}（可选 auto / manual）")
         if mode == self._mode:
@@ -388,6 +399,12 @@ class FanController:
         Raises:
             ValueError: 值非法（API 层会转成 400）。
         """
+        if "control.mode" in settings:
+            value = settings["control.mode"]
+            if value not in ("auto", "manual"):
+                raise ValueError("control.mode 只能是 auto / manual")
+            self._switch_mode(value)
+
         if "control.enabled" in settings:
             self._enabled = bool(settings["control.enabled"])
             logger.info("控制总开关 → %s", "开启" if self._enabled else "关闭")
@@ -454,6 +471,7 @@ class FanController:
         return {
             "control.enabled": self._enabled,
             "control.interval": self._interval,
+            "control.mode": self._mode,
             "control.managed_gpus": sorted(self._managed_gpus or []),
             "curve": self._curve.describe(),
             "safety.emergency_temp": self._emergency_temp,
