@@ -120,17 +120,25 @@ cat logs/fancontroller.log.YYYY-MM-DD
 
 ## 添加新服务器型号支持
 
-1. 在 `fanController/` 目录下创建新的控制器类文件 (如 `dellr410_controller.py`)
-2. 继承 `IPMIFanController` 基类并实现以下方法:
-   - `get_cpu_temperature()`: 解析 IPMI 温度传感器输出
+> **架构原则（2026-09-28 改造后）：「读」统一，「写」分机型。**
+> 风扇转速与温度都由基类从 Prometheus 取（数据源是 ipmi_exporter / DCGM），
+> 子类只负责实现该机型**特有的「写」命令**。
+
+1. 在 `fanController/` 目录下创建新的控制器类文件（如 `epycd8_controller.py`）
+2. 继承 `IPMIFanController` 基类，实现该机型特有的写操作：
    - `set_fan_speed(fan_index, percentage)`: 设置风扇转速的 IPMI raw 命令
-   - `get_fan_rotational_speed()`: 解析 IPMI 风扇转速输出
-   - `process_server_loop()`: 重写循环模式（如需特定初始化）
-   - `process_server_once()`: 重写单次模式（如需特定初始化）
-   - `start_fan_control()`: 启动循环控制
-   - `run_once()`: 执行单次控制
-3. (可选) 重写 `set_ipmi_manual_mode()` 和 `set_ipmi_auto_mode()` 如果命令不同
-4. 在 `fancontroller.py` 和 `fancontroller_once.py` 中添加新类型的判断逻辑
+   - `_get_base_command()`: 生成基础命令前缀（`ip: "local"` 时返回空串）
+   - `set_ipmi_manual_mode()` / `set_ipmi_auto_mode()`: 手动/自动模式切换
+     （部分机型如 EPYCD8 没有独立的「切手动」命令，写占空比本身就是手动）
+   - `_build_temperature_query()` (**可选**): 换温度源时覆盖它。
+     默认查 **CPU 核心温度**（node_exporter 的 hwmon，按语义标签 `Tctl` 过滤）；
+     EPYCD8 覆盖此方法去查 **GPU 温度**（DCGM），因为它的机箱风扇是给 GPU 散热的
+   - `start_fan_control()` / `run_once()`: 入口方法
+3. **不需要实现 `get_fan_rotational_speed()` 或 `get_cpu_temperature()`**
+   —— 两者都已由基类统一从 Prometheus 获取（原先各机型各写一份 sdr 解析，
+   列结构还互不相同）
+4. 在 `fancontroller.py` 与 `fancontroller_once.py` 的 `CONTROLLER_TYPES`
+   字典里登记一行：`'新机型名': 新控制器类`
 
 ## 重要注意事项
 
@@ -152,9 +160,48 @@ cat logs/fancontroller.log.YYYY-MM-DD
 - 自动模式 IPMI 命令: `raw 0x30 0x30 0x01 0x01`
 - 设置风扇转速: `raw 0x30 0x30 0x02 0x{fan_index:02x} 0x{percentage:02x}`
 
+### Prometheus 数据源（2026-09-28 改造）
+
+**「读」全部统一走 Prometheus**，不再由各机型子类执行 `ipmitool sdr`：
+
+```yaml
+prometheus:
+  base_url: "http://192.168.6.31:30091"
+  timeout: 10
+
+servers:
+  - type: epycd8
+    prometheus:                          # per-server 覆盖（多机场景必需）
+      fan_instance:  "192.168.6.7:9290"  # 风扇转速 ← ipmi_exporter
+      temp_instance: "192.168.6.7:9100"  # CPU 温度  ← node_exporter
+      gpu_instance:  "192.168.6.7:9400"  # GPU 温度  ← DCGM exporter
+```
+
+| 数据 | 指标 | instance（pve02 实测） |
+|------|------|----------------------|
+| 风扇转速 | `ipmi_fan_speed_rpm{name="FRNT_FAN1"}` | `192.168.6.7:9290` |
+| CPU 温度 | `node_hwmon_temp_celsius`（按语义标签 `label="Tctl"` 过滤） | `192.168.6.7:9100` |
+| GPU 温度 | `DCGM_FI_DEV_GPU_TEMP` | `192.168.6.7:9400` |
+
+⚠️ **三个 instance 对应三个不同的 exporter，混用会直接查不到数据。** 配置项
+分别为 `fan_instance` / `temp_instance` / `gpu_instance`（笼统的 `instance` 仍
+作兜底）。
+
+⚠️ **拿到的是上一次 scrape 的快照，不是实时值。** pve 各 target 的
+`scrape_interval` 实测为 **30s**，也就是温度最多滞后 30 秒 —— 对控速决策是明显
+滞后，**建议把这些 target 的抓取间隔调小**（node_exporter 采集很轻，10s 毫无压力）。
+
+⚠️ Prometheus 不可用时读不到任何数据（本地 in-band 的 ipmitool 反而不依赖它）。
+调用方已做空值保护，但排查时先查 Prometheus 连通性。
+
+> 补充：CPU 温度走 `node_exporter --collector.hwmon`，它读的就是内核 hwmon
+> （`/sys/class/hwmon/`），与直接读 sysfs 是同一份数据。注意 hwmon 里 k10temp
+> 的 chip 名是 PCI 路径形式（`pci0000:00_0000:00:18_3`）而非可读的 `k10temp`，
+> 所以查询用 `node_hwmon_sensor_label{label="Tctl"}` 做语义过滤，别硬编码 chip 名。
+
 ### 依赖项
 - **PyYAML**: 用于解析 YAML 配置文件
-- 其他功能仅依赖 Python 标准库
+- 其他功能仅依赖 Python 标准库（Prometheus 查询用 `urllib` 实现，无需 `requests`）
 
 ## 兼容的服务器型号
 
@@ -162,3 +209,4 @@ cat logs/fancontroller.log.YYYY-MM-DD
 |------|------|------------|
 | Dell | 730XD | `dell730` |
 | Dell | 730 | `dell730` |
+| ASRock Rack | EPYCD8 | `epycd8` |

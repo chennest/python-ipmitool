@@ -4,8 +4,12 @@ import time
 import logging
 from datetime import datetime
 
+from utils.prometheus_client import PrometheusClient, PrometheusError
+
+
 class IPMIFanController:
-    def __init__(self, servers, interval, windows_ipmi_tool_path, logger, auto=True, alert_config=None):
+    def __init__(self, servers, interval, windows_ipmi_tool_path, logger, auto=True,
+                 alert_config=None, prometheus_config=None):
         """
         初始化 IPMI 风扇控制器。
 
@@ -16,6 +20,9 @@ class IPMIFanController:
             logger (logging.Logger): 配置好的日志记录器实例。
             auto (bool): 是否自动模式，True为自动模式，False为手动模式。
             alert_config (dict, optional): 告警配置字典。
+            prometheus_config (dict, optional): Prometheus 查询配置，形如
+                ``{'base_url': 'http://192.168.6.31:30091', 'instance': '192.168.6.7:9290'}``。
+                风扇转速统一从这里取（见 :meth:`get_fan_rotational_speed`）。
         """
         self.platform_system = platform.system()
         if self.platform_system == 'Windows':
@@ -55,6 +62,27 @@ class IPMIFanController:
             except Exception as e:
                 self.logger.error(f"初始化邮件通知器失败: {str(e)}")
                 self.alert_enabled = False
+
+        # --- Prometheus 数据源（风扇转速统一从这里取，见 get_fan_rotational_speed）---
+        # 全局配置 + servers 项内的 per-server 覆盖：多机场景下每台机器的
+        # instance 标签不同，必须逐台指定，否则会把别的机器的转速当成自己的。
+        self.prometheus_config = dict(prometheus_config or {})
+        server_override = self.servers.get('prometheus') or {}
+        if server_override:
+            self.prometheus_config.update(server_override)
+
+        self.prometheus_client = None
+        base_url = self.prometheus_config.get('base_url')
+        if base_url:
+            self.prometheus_client = PrometheusClient(
+                base_url=base_url,
+                timeout=self.prometheus_config.get('timeout', 10),
+            )
+            self.logger.info(f"服务器 {self.ip}: 风扇转速数据源 = Prometheus ({base_url})")
+        else:
+            self.logger.warning(
+                f"服务器 {self.ip}: 未配置 prometheus.base_url，风扇转速将无法获取"
+            )
 
     def send_command(self, cmd_in):
         """
@@ -96,14 +124,94 @@ class IPMIFanController:
         """
         raise NotImplementedError("Method set_fan_speed must be implemented by subclasses")
 
-    def get_cpu_temperature(self):
-        """
-        获取服务器的 CPU 温度。
+    def _pick_instance(self, *keys):
+        """从 prometheus 配置里按顺序取第一个非空的 instance 标签。
 
-        Raises:
-            NotImplementedError: 子类必须实现此方法。
+        ⚠️ **不同数据源的 instance 是不同的**，因为它们是各自的 exporter：
+
+        ============  ==================  ==========================
+        数据          指标                instance（pve02 实测）
+        ============  ==================  ==========================
+        风扇转速       ipmi_fan_speed_rpm  ``192.168.6.7:9290``
+        CPU 温度       node_hwmon_temp_*   ``192.168.6.7:9100``
+        GPU 温度       DCGM_FI_DEV_*       ``192.168.6.7:9400``
+        ============  ==================  ==========================
+
+        混用一个 ``instance`` 会直接查不到数据 —— 这个坑 2026-09-28 实现时踩到。
+        配置里推荐分别写 ``fan_instance`` / ``temp_instance`` / ``gpu_instance``；
+        为兼容单数据源场景，仍接受笼统的 ``instance`` 作为兜底。
         """
-        raise NotImplementedError("Method get_cpu_temperature must be implemented by subclasses")
+        for key in keys:
+            value = self.prometheus_config.get(key)
+            if value:
+                return value
+        return None
+
+    #: 温度查询里用作语义过滤的传感器标签。
+    #: AMD ``k10temp`` 与 Intel ``coretemp`` 的 CPU 核心温度标签都是 ``Tctl``。
+    #: 子类可覆盖本常量，或直接覆盖 :meth:`_build_temperature_query`。
+    TEMPERATURE_SENSOR_LABEL = "Tctl"
+
+    def _build_temperature_query(self):
+        """组装温度查询语句（PromQL）。子类可覆盖以换温度源。
+
+        默认查 **CPU 核心温度**，且刻意用**语义标签** ``Tctl`` 过滤，而不是
+        按 hwmon 的 chip 名 —— k10temp 在 Prometheus 里的 chip 名是 PCI 路径
+        形式（``pci0000:00_0000:00:18_3``），硬编码它换台机器就失效了。
+        用 chip 名反查的那个坑 2026-09-28 实测踩过一次。
+
+        Returns:
+            str | None: PromQL 语句；返回 ``None`` 表示无法构造（缺配置）。
+        """
+        instance = self._pick_instance('temp_instance', 'instance')
+        selectors = [f'label="{self.TEMPERATURE_SENSOR_LABEL}"']
+        if instance:
+            selectors.append(f'instance="{instance}"')
+        label_filter = "{" + ",".join(selectors) + "}"
+        return (
+            "node_hwmon_temp_celsius * on(chip, sensor) group_left(label) "
+            f"node_hwmon_sensor_label{label_filter}"
+        )
+
+    def get_cpu_temperature(self):
+        """获取温度（°C 列表）—— 统一走 Prometheus，与机型无关。
+
+        2026-09-28 改造：与风扇转速同样的思路，「读」这一层收归基类。
+        数据源是 **node_exporter 的 hwmon collector**（``node_hwmon_temp_celsius``）
+        —— 它读的就是内核 hwmon（``/sys/class/hwmon/``），与直接读 sysfs
+        是同一份数据，这里只是换成了 Prometheus 指标这一层封装。
+
+        ⚠️ **延迟提醒**：拿到的是 Prometheus 上一次 scrape 的快照。pve 各
+        target 的 ``scrape_interval`` 实测为 **30s**，也就是温度最多滞后 30 秒。
+        对控速决策而言这是明显滞后 —— 建议把这些 target 的抓取间隔调小，
+        node_exporter 采集很轻，调到 10s 毫无压力。
+
+        Returns:
+            list: 温度列表（°C）。取不到时返回**空列表**，不抛异常。
+        """
+        if self.prometheus_client is None:
+            self.logger.error(
+                f"服务器 {self.ip}: 未配置 Prometheus 数据源，无法获取温度"
+            )
+            return []
+
+        promql = self._build_temperature_query()
+        if not promql:
+            return []
+
+        try:
+            samples = self.prometheus_client.query(promql)
+        except PrometheusError as e:
+            self.logger.error(f"服务器 {self.ip}: 从 Prometheus 获取温度失败: {e}")
+            return []
+
+        temperatures = [s.value for s in samples]
+        if not temperatures:
+            self.logger.warning(
+                f"服务器 {self.ip}: Prometheus 中没有温度数据（查询: {promql}）—— "
+                f"确认目标机的 node_exporter 已开启 --collector.hwmon 并接入 Prometheus"
+            )
+        return temperatures
 
     def set_ipmi_manual_mode(self):
         """
@@ -116,12 +224,48 @@ class IPMIFanController:
         return self.ipmi_command(command)
 
     def get_fan_rotational_speed(self):
-        """获取 Dell 730 服务器 风扇转速 的方法。
+        """获取风扇转速 —— 统一走 Prometheus（数据源是 ipmi_exporter）。
+
+        2026-09-28 改造说明：原先「读转速」下放到各机型子类，各自执行
+        ``ipmitool sdr type fan`` 再解析文本。三个问题：
+
+        1. **输出格式各机型不一致** —— Dell 与 ASRock Rack 的 sdr 列结构完全
+           两套，每加一个机型就要重写一遍解析（还容易写错，见 sensors.py 里
+           那个把传感器 ID 当成 RPM 的踩坑记录）
+        2. **每轮都要 spawn 一个 ipmitool 进程**，还要管 BMC 连接
+        3. **读数口径可能与看板对不上** —— 控制器一个值、Grafana 另一个值
+
+        改成统一查 Prometheus 后，「读」这一层与机型无关了，子类只需负责
+        「怎么写」（见 :meth:`set_fan_speed`）。
+
+        ⚠️ **代价**：拿到的是上一次 scrape 的快照（延迟由 Prometheus 的
+        ``scrape_interval`` 决定），且 Prometheus 不可用时完全读不到数据。
 
         Returns:
-            list: 包含 风扇转速 的列表。
+            list: 风扇转速（RPM）列表。取不到时返回**空列表**，不抛异常 ——
+            调用方必须自行处理空结果。
         """
-        raise NotImplementedError("Method get_cpu_temperature must be implemented by subclasses")
+        if self.prometheus_client is None:
+            self.logger.error(
+                f"服务器 {self.ip}: 未配置 Prometheus 数据源，无法获取风扇转速"
+            )
+            return []
+
+        try:
+            speeds = self.prometheus_client.get_fan_speeds(
+                instance=self._pick_instance('fan_instance', 'instance')
+            )
+        except PrometheusError as e:
+            self.logger.error(f"服务器 {self.ip}: 从 Prometheus 获取风扇转速失败: {e}")
+            return []
+
+        if not speeds:
+            self.logger.warning(
+                f"服务器 {self.ip}: Prometheus 中没有风扇转速数据 —— "
+                f"请确认该机器的 ipmi_exporter 已接入，且 prometheus.instance "
+                f"标签配置正确"
+            )
+        return speeds
 
     def adjust_fans_once(self, prev_temp_ranges=None, prev_fan_speeds=None):
         """
@@ -154,8 +298,19 @@ class IPMIFanController:
             max_temp_value = max(cpu_temps)
             min_temp_value = min(cpu_temps)
             avg_temp_value = sum(cpu_temps) // len(cpu_temps)
-            max_fan_speed = max(current_fan_speeds)
-            min_fan_speed = min(current_fan_speeds)
+            # ⚠️ 空值保护：改用 Prometheus 取数后，「查不到数据」是正常情况
+            # （exporter 未接入 / Prometheus 挂了 / instance 标签配错）。
+            # 上游在这里直接 max([]) 会 ValueError 把整个控制线程打挂，
+            # 进程还活着但已经不再控风扇 —— 典型的静默失效。
+            if current_fan_speeds:
+                max_fan_speed = max(current_fan_speeds)
+                min_fan_speed = min(current_fan_speeds)
+            else:
+                max_fan_speed = 0
+                min_fan_speed = 0
+                self.logger.warning(
+                    f"服务器 {self.ip}: 本轮没有风扇转速数据，跳过转速相关判断"
+                )
             result['cpu_temp'] = max_temp_value
             result['max_fan_speed'] = max_fan_speed
 

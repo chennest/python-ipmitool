@@ -45,6 +45,23 @@ alert:
       - "admin@example.com"
       - "alert@example.com"
 
+# Prometheus 数据源（风扇转速统一从这里取）
+#
+# 2026-09-28 改造：不再由各机型子类执行 `ipmitool sdr type fan` 拉转速，
+# 统一改为查 Prometheus（数据源是 ipmi_exporter）。这样「读」这一层与机型
+# 无关 —— 加新机型时只需要写它特有的「写」命令。
+#
+# ⚠️ 注意：拿到的是**上一次 scrape 的快照**，不是实时值。所以「设完转速立刻
+# 回读验证」会读到旧值，需要等一个 scrape 周期。
+prometheus:
+  # Prometheus 地址（本项目实测为 k8s 集群 NodePort）
+  base_url: "http://192.168.6.31:30091"
+  # 单次查询超时（秒）
+  timeout: 10
+  #
+  # 「读哪台机器」由 instance 标签决定，**必须逐台在 servers[].prometheus
+  # 里指定** —— 不同数据的 instance 是不同的 exporter 地址，见下面 epycd8 示例。
+
 # 服务器列表
 servers:
   - type: dell730                    # 服务器类型
@@ -82,3 +99,45 @@ servers:
       - min_temp: 61
         max_temp: 80
         fan_speeds: [25, 25, 25, 25, 25, 25]
+
+  # ================= ASRock Rack EPYCD8（永擎）=================
+  #
+  # 与 Dell 的关键差异（写命令完全不同，详见 fanController/epycd8_controller.py）：
+  #
+  #   1. fan_speeds 必须给 **8 个值**（Dell 730 是 6 个），按 payload 下标对应：
+  #        下标 0 = CPU1_FAN1     下标 1 = 保留位（恒自动）
+  #        下标 2 = REAR_FAN1     下标 3 = REAR_FAN2
+  #        下标 4 = FRNT_FAN1     下标 5~7 = FRNT_FAN2~4
+  #
+  #   2. **值写 0 = 把该位交回 BMC 自动控制**（Dell 那边 0 没有意义）。
+  #      所以「只控两个 GPU 风扇位」就写成 [0,0,0,50,50,0,0,0]
+  #
+  #   3. 本机型的「温度」指的是 **GPU 温度**：BMC 里没有任何 GPU 温度传感器，
+  #      而机箱风扇是 Tesla T10（原厂被动散热）的唯一散热手段。温度源同样
+  #      走 Prometheus（DCGM exporter 的 DCGM_FI_DEV_GPU_TEMP）。
+  - type: epycd8
+    ip: "local"                        # 脚本跑在目标机本机时填 local（走 in-band，无需凭据）
+    user: "-"
+    password: "-"
+    prometheus:                        # per-server 覆盖全局配置（多机场景必需）
+      # ⚠️ 三个 instance 对应三个**不同的 exporter**，混用会直接查不到数据：
+      fan_instance: "192.168.6.7:9290"   # 风扇转速 ← ipmi_exporter
+      temp_instance: "192.168.6.7:9100"  # CPU 温度 ← node_exporter（需开 --collector.hwmon）
+      gpu_instance: "192.168.6.7:9400"   # GPU 温度 ← DCGM exporter（仅本机型用）
+    temperature_ranges:
+      # 温度区间按 GPU 温度划分（多卡时取最热那张）
+      - min_temp: 0
+        max_temp: 54
+        fan_speeds: [0, 0, 0, 40, 40, 0, 0, 0]    # REAR_FAN2 + FRNT_FAN1 = 40%
+      - min_temp: 55
+        max_temp: 64
+        fan_speeds: [0, 0, 0, 50, 50, 0, 0, 0]
+      - min_temp: 65
+        max_temp: 74
+        fan_speeds: [0, 0, 0, 70, 70, 0, 0, 0]
+      - min_temp: 75
+        max_temp: 84
+        fan_speeds: [0, 0, 0, 85, 85, 0, 0, 0]
+      - min_temp: 85
+        max_temp: 120
+        fan_speeds: [0, 0, 0, 100, 100, 0, 0, 0]  # 拉满

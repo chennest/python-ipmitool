@@ -21,6 +21,14 @@ from logging.handlers import TimedRotatingFileHandler
 import yaml
 
 from fanController.dell730_controller import Dell730FanController
+from fanController.epycd8_controller import Epycd8FanController
+
+
+#: 机型 → 控制器类 的映射（与 fancontroller.py 保持一致）。
+CONTROLLER_TYPES = {
+    'dell730': Dell730FanController,
+    'epycd8': Epycd8FanController,
+}
 
 
 def main():
@@ -76,19 +84,28 @@ def main():
     windows_ipmi_tool_path = data['windows_ipmi_tool_path']
     interval = data.get('interval', 60)  # 单次模式不使用 interval，但保留参数兼容性
     alert_config = data.get('alert', {})  # 获取告警配置
+    prometheus_config = data.get('prometheus', {})  # Prometheus 数据源配置
 
     for server in servers:
-        if server['type'] == 'dell730':
-            fan_controller = Dell730FanController(
-                servers=server,
-                interval=interval,
-                windows_ipmi_tool_path=windows_ipmi_tool_path,
-                logger=logger,
-                auto=False,  # 单次模式不需要 auto 参数
-                alert_config=alert_config
+        controller_class = CONTROLLER_TYPES.get(server['type'])
+        if controller_class is None:
+            logger.warning(
+                f"未知的服务器类型 {server['type']!r}（{server.get('ip')}），已跳过。"
+                f"当前支持的机型: {', '.join(sorted(CONTROLLER_TYPES))}"
             )
-            # 执行一次风扇控制
-            fan_controller.run_once()
+            continue
+
+        fan_controller = controller_class(
+            servers=server,
+            interval=interval,
+            windows_ipmi_tool_path=windows_ipmi_tool_path,
+            logger=logger,
+            auto=False,  # 单次模式不需要 auto 参数
+            alert_config=alert_config,
+            prometheus_config=prometheus_config,
+        )
+        # 执行一次风扇控制
+        fan_controller.run_once()
 
     logger.info("单次执行完成")
 

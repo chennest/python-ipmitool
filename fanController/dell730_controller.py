@@ -1,4 +1,3 @@
-import re
 import time
 import logging
 
@@ -28,41 +27,15 @@ class Dell730FanController(IPMIFanController):
         set_speed_cmd = f"{base_cmd} raw 0x30 0x30 0x02 0x{fan_index:02x} 0x{hex_percentage}"
         self.ipmi_command(set_speed_cmd.strip())
 
-    def get_cpu_temperature(self):
-        """获取 Dell 730 服务器 CPU 温度的方法。
-
-        Returns:
-            list: 包含 CPU 温度的列表。
-        """
-        base_cmd = self._get_base_command()
-        command = f"{base_cmd} sdr type Temperature"
-        output = self.ipmi_command(command.strip())
-
-        temp_list = []
-        for line in output.split("\n"):
-            items = line.split("|")
-            if len(items) > 1 and "ok" in items[2]:
-                if "0Eh" in items[1] or "0Fh" in items[1]:
-                    temp_match = re.search(r'(\d+)\s+degrees\s+C', items[4])
-                    if temp_match:
-                        temp = int(temp_match.group(1))
-                        temp_list.append(temp)
-        return temp_list
-
-    def get_fan_rotational_speed(self):
-        """获取 Dell 730 服务器 风扇转速 的方法。
-
-        Returns:
-            list: 包含 风扇转速 的列表。
-        """
-        base_cmd = self._get_base_command()
-        command = f"{base_cmd} sdr type fan"
-        output = self.ipmi_command(command.strip())
-
-        rpm_values = re.findall(r'\|\s(\d+)\sRPM', output)
-        rpm_values = [int(rpm) for rpm in rpm_values]
-
-        return rpm_values
+    # 注意：get_cpu_temperature() 与 get_fan_rotational_speed() 已于 2026-09-28
+    # 从本类**移除**，「读」这一层收归基类统一走 Prometheus：
+    #   - 温度 ← node_hwmon_temp_celsius（node_exporter 的 hwmon collector）
+    #   - 转速 ← ipmi_fan_speed_rpm（ipmi_exporter）
+    # 原先这两个方法各自执行 `ipmitool sdr type Temperature / fan` 再正则解析，
+    # 而各机型的 sdr 列结构完全不同（Dell 与 ASRock Rack 就是两套），属于
+    # 「按机型重复实现同一件事」。旧的 CPU 温度解析还依赖 `0Eh` / `0Fh` 这种
+    # 传感器 ID 硬编码，固件一升级就可能失效。
+    # 本类现在只负责 Dell 特有的「写」：set_fan_speed / 手动模式 / PCIe 散热响应。
 
     def _initialize_dell730(self):
         """

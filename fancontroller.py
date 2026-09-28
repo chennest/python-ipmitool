@@ -22,6 +22,16 @@ from logging.handlers import TimedRotatingFileHandler
 import yaml
 
 from fanController.dell730_controller import Dell730FanController
+from fanController.epycd8_controller import Epycd8FanController
+
+
+#: 机型 → 控制器类 的映射。
+#: 配置里 ``servers[].type`` 填什么，就分发到哪个控制器 —— 新增机型时在这里
+#: 登记一行即可，下面的分发逻辑不用动。
+CONTROLLER_TYPES = {
+    'dell730': Dell730FanController,
+    'epycd8': Epycd8FanController,
+}
 
 
 def main():
@@ -79,21 +89,30 @@ def main():
     windows_ipmi_tool_path = data['windows_ipmi_tool_path']
     interval = data['interval']
     alert_config = data.get('alert', {})  # 获取告警配置
+    prometheus_config = data.get('prometheus', {})  # Prometheus 数据源配置
     threads = []
 
     for server in servers:
-        if server['type'] == 'dell730':
-            fan_controller = Dell730FanController(
-                servers=server,
-                interval=interval,
-                windows_ipmi_tool_path=windows_ipmi_tool_path,
-                logger=logger,
-                auto=True,  # 循环模式
-                alert_config=alert_config
+        controller_class = CONTROLLER_TYPES.get(server['type'])
+        if controller_class is None:
+            logger.warning(
+                f"未知的服务器类型 {server['type']!r}（{server.get('ip')}），已跳过。"
+                f"当前支持的机型: {', '.join(sorted(CONTROLLER_TYPES))}"
             )
-            thread = threading.Thread(target=fan_controller.start_fan_control, name=f"Thread-{server['ip']}")
-            thread.start()
-            threads.append(thread)
+            continue
+
+        fan_controller = controller_class(
+            servers=server,
+            interval=interval,
+            windows_ipmi_tool_path=windows_ipmi_tool_path,
+            logger=logger,
+            auto=True,  # 循环模式
+            alert_config=alert_config,
+            prometheus_config=prometheus_config,
+        )
+        thread = threading.Thread(target=fan_controller.start_fan_control, name=f"Thread-{server['ip']}")
+        thread.start()
+        threads.append(thread)
 
     for thread in threads:
         thread.join()
