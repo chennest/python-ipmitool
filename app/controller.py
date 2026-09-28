@@ -1078,6 +1078,7 @@ class FanController:
                     "temperature": g.temperature,
                     "power_watts": g.power_watts,
                     "utilization": g.utilization,
+                    "clock_mhz": g.clock_mhz,
                     "memory_used_mib": g.memory_used_mib,
                     "memory_total_mib": g.memory_total_mib,
                     "memory_percent": g.memory_percent,

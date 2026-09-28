@@ -72,6 +72,7 @@ def collect(config: AppConfig) -> dict[str, Any]:
             "temperature_c": g.temperature,
             "power_watts": g.power_watts,
             "utilization_pct": g.utilization,
+            "clock_mhz": g.clock_mhz,
             "memory_used_mib": g.memory_used_mib,
             "memory_total_mib": g.memory_total_mib,
             "memory_pct": g.memory_percent,

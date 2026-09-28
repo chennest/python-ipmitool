@@ -131,6 +131,8 @@ class GPUMetric:
     temperature: float | None = None
     power_watts: float | None = None
     utilization: float | None = None
+    #: SM/核心频率（MHz）—— 概览卡片展示用的「GPU 频率」
+    clock_mhz: float | None = None
     memory_used_mib: float | None = None
     memory_total_mib: float | None = None
     source: str = ""
@@ -214,6 +216,8 @@ class GPUMetricsReader:
         "DCGM_FI_DEV_GPU_TEMP": "temperature",
         "DCGM_FI_DEV_POWER_USAGE": "power_watts",
         "DCGM_FI_DEV_GPU_UTIL": "utilization",
+        # SM/核心频率（MHz）。dcgm-exporter 默认指标集里就有，无需加 --metrics
+        "DCGM_FI_DEV_SM_CLOCK": "clock_mhz",
         "DCGM_FI_DEV_FB_USED": "memory_used_mib",
         # FB_TOTAL 在部分版本里不直接提供，用 USED + FREE 兜底
         "DCGM_FI_DEV_FB_FREE": "_memory_free_mib",
@@ -257,7 +261,8 @@ class GPUMetricsReader:
 
     _SMI_FIELDS = (
         "index,uuid,pci.bus_id,name,"
-        "temperature.gpu,power.draw,utilization.gpu,memory.used,memory.total"
+        "temperature.gpu,power.draw,utilization.gpu,memory.used,memory.total,"
+        "clocks.sm"
     )
 
     def _read_nvidia_smi(self) -> list[GPUMetric]:
@@ -286,6 +291,8 @@ class GPUMetricsReader:
                     temperature=_safe_float(parts[4]),
                     power_watts=_safe_float(parts[5]),
                     utilization=_safe_float(parts[6]),
+                    # clocks.sm 是后加的字段 —— 老驱动列数不足时容忍缺失
+                    clock_mhz=_safe_float(parts[9]) if len(parts) > 9 else None,
                     memory_used_mib=_safe_float(parts[7]),
                     memory_total_mib=_safe_float(parts[8]),
                     source="nvidia-smi",

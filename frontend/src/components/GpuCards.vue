@@ -44,6 +44,7 @@ function slotsOf(gpu: GpuInfo): string[] {
           <div class="pb-1 text-right text-[11px] leading-relaxed text-zinc-500 tnum">
             <p>{{ fmt(gpu.power_watts, 1, ' W') }}</p>
             <p>{{ fmtInt(gpu.utilization, '%') }} 利用率</p>
+            <p>{{ fmtInt(gpu.clock_mhz, ' MHz') }} 频率</p>
           </div>
         </div>
 

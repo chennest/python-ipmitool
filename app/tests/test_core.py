@@ -388,6 +388,43 @@ ipmi_fan_speed_rpm{id="29",name="REAR_FAN2"} 3000
         self.assertEqual(parse_prometheus(""), [])
 
 
+class TestGpuDcgmReader(unittest.TestCase):
+    """DCGM 字段映射 → ``GPUMetric``（含新增的 SM 时钟 = 概览卡片的「GPU 频率」）。"""
+
+    SAMPLE = """\
+DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39",pci_bus_id="00000000:01:00.0",modelName="Tesla T10"} 45
+DCGM_FI_DEV_POWER_USAGE{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"} 43.017
+DCGM_FI_DEV_SM_CLOCK{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"} 1380
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"} 1234
+DCGM_FI_DEV_FB_FREE{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"} 15150
+"""
+
+    def _read(self, text: str):
+        from app.sensors import GPUMetricsReader
+
+        reader = GPUMetricsReader()
+        with mock.patch("app.sensors._fetch_text", return_value=text):
+            return reader._read_dcgm()
+
+    def test_maps_sm_clock(self) -> None:
+        """SM 时钟必须映射到 ``clock_mhz``（概览卡片展示的就是它）。"""
+        metrics = self._read(self.SAMPLE)
+        self.assertEqual(len(metrics), 1)
+        m = metrics[0]
+        self.assertEqual(m.temperature, 45.0)
+        self.assertEqual(m.clock_mhz, 1380.0)
+        self.assertEqual(m.memory_total_mib, 16384.0, "FB_USED + FB_FREE = 显存总量")
+
+    def test_missing_clock_stays_none(self) -> None:
+        """老版 exporter 没暴露 SM_CLOCK 时不炸，字段为 None（前端显示占位符）。"""
+        lines = [
+            line for line in self.SAMPLE.splitlines() if "SM_CLOCK" not in line
+        ]
+        metrics = self._read("\n".join(lines))
+        self.assertEqual(len(metrics), 1)
+        self.assertIsNone(metrics[0].clock_mhz)
+
+
 class TestSdrFanParsing(unittest.TestCase):
     """``ipmitool sdr type fan`` 输出解析。
 

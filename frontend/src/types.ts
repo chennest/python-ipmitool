@@ -13,6 +13,8 @@ export interface GpuInfo {
   temperature: number | null
   power_watts: number | null
   utilization: number | null
+  /** SM/核心频率（MHz）；DCGM 的 DCGM_FI_DEV_SM_CLOCK，nvidia-smi 兜底 clocks.sm */
+  clock_mhz: number | null
   memory_used_mib: number | null
   memory_total_mib: number | null
   memory_percent: number | null
