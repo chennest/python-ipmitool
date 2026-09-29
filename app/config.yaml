@@ -29,10 +29,11 @@ sources:
   http_timeout: 5
 
   # 远程 BMC 兜底（宿主系统起不来时排障用）。默认走本地 in-band，不配这项。
+  # ⚠️ 换成你自己的 BMC 地址与凭据；凭据绝不要提交到公开仓库。
   # ipmi_remote:
-  #   host: "192.168.6.8"
-  #   user: "admin"
-  #   password: "admin"
+  #   host: "192.0.2.11"          # 示例地址（RFC 5737 文档段），按实际替换
+  #   user: "your-bmc-user"
+  #   password: "your-bmc-password"
 
   # --- 历史趋势（可选，只给 /api/history 用）---
   #
@@ -40,10 +41,11 @@ sources:
   # 而上面两个 endpoint 是直连 exporter，读的才是当下值。
   # 但历史曲线恰恰是 Prometheus 的主场，所以单独配一套。
   # 不配的话界面上的趋势图会显示"暂无历史数据"，其余功能不受影响。
-  prometheus_url: "http://192.168.6.31:30091"
-  prometheus_gpu_instance: "192.168.6.7:9400"    # GPU 温度  ← DCGM exporter
-  prometheus_node_instance: "192.168.6.7:9100"   # CPU 温度  ← node_exporter
-  prometheus_fan_instance: "192.168.6.7:9290"    # 风扇转速  ← ipmi_exporter
+  # ⚠️ 下面的地址全部是示例（RFC 5737 文档段），按你的实际环境替换。
+  prometheus_url: "http://192.0.2.20:30091"      # 示例：你的 Prometheus 地址
+  prometheus_gpu_instance: "192.0.2.10:9400"     # GPU 温度  ← DCGM exporter
+  prometheus_node_instance: "192.0.2.10:9100"    # CPU 温度  ← node_exporter
+  prometheus_fan_instance: "192.0.2.10:9290"     # 风扇转速  ← ipmi_exporter
 
 curve:
   # 滞回带（°C）：降温方向必须跌出这个带宽才降档，防止温度在阈值附近

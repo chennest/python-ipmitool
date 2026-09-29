@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 #
-# 一键部署 GPU 风扇控制台到 pve02
+# 一键部署 GPU 风扇控制台到目标机
 #
 #   ./deploy.sh                 全量（后端 + 前端）→ 覆盖 → 重启 → 自检
 #   ./deploy.sh --static-only   只更新前端（不改后端，不重启，静态文件即时生效）
 #   ./deploy.sh --no-build      跳过前端构建（复用 app/static 里已有的产物）
 #   ./deploy.sh --no-restart    传完不重启（全量模式下慎用）
 #
-# 可用环境变量覆盖默认值：
-#   CONN=pve02 REMOTE_DIR=/opt/gpu-fan-console SERVICE=gpu-fan-console URL=http://192.168.6.7:8765
+# 可用环境变量（CONN 必填，其余有默认值）：
+#   CONN=<ssh连接名> REMOTE_DIR=/opt/gpu-fan-console SERVICE=gpu-fan-console URL=http://<目标机>:8765
 #
 # 为什么不用 agentsshcli upload：它现在报「创建远端续传元数据失败」，虽然数据传完了
 # 但整体返回失败（--no-cache 直连模式也无效，已实测）。所以走分片 base64，见 DEPLOY.md 坑 ②。
 #
 set -euo pipefail
 
-CONN="${CONN:-pve02}"
+CONN="${CONN:?用法: CONN=<ssh连接名> ./deploy.sh}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/gpu-fan-console}"
 SERVICE="${SERVICE:-gpu-fan-console}"
-URL="${URL:-http://192.168.6.7:8765}"
+URL="${URL:-http://127.0.0.1:8765}"
 # 单次命令行上限 32767 字符（Windows），留出余量
 CHUNK_SIZE="${CHUNK_SIZE:-30000}"
 
@@ -71,8 +71,11 @@ if [ "$STATIC_ONLY" -eq 1 ]; then
   tar czf "$PKG" -C . app/static
 else
   # ⚠️ --exclude='app/data' 是在保命：那是 SQLite 权威数据源，被覆盖等于丢失全部配置
+  # ⚠️ --exclude='app/config.yaml'：仓库里的是模板（示例地址），覆盖会毁掉现场配好的
+  #    prometheus_url 等本机值。首次部署请手动传一次完整 config.yaml 再改。
   tar czf "$PKG" \
       --exclude='__pycache__' --exclude='*.pyc' --exclude='app/data' \
+      --exclude='app/config.yaml' \
       -C . app
 fi
 echo "  包大小：$(wc -c <"$PKG") bytes"

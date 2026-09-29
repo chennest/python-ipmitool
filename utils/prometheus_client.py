@@ -63,7 +63,7 @@ class PrometheusClient:
     def __init__(self, base_url: str, timeout: float = 10.0):
         """
         Args:
-            base_url: Prometheus 地址，如 ``http://192.168.6.31:30091``。
+            base_url: Prometheus 地址，如 ``http://192.0.2.20:30091``。
             timeout: 单次查询超时（秒）。**必须有** —— 上游项目就是因为
                 不带超时的阻塞式 subprocess 读取而静默挂死过。
         """
@@ -123,7 +123,7 @@ class PrometheusClient:
 
         Args:
             instance: 限定 Prometheus 的 ``instance`` 标签，如
-                ``192.168.6.7:9290``。**多机环境务必传**，否则会把别的
+                ``192.0.2.10:9290``。**多机环境务必传**，否则会把别的
                 机器的转速混进来。
             job: 可选，进一步限定抓取任务名。
         """
@@ -168,7 +168,7 @@ class PrometheusClient:
         决定风量的那张。
 
         Args:
-            instance: DCGM exporter 的 instance 标签，如 ``192.168.6.7:9400``。
+            instance: DCGM exporter 的 instance 标签，如 ``192.0.2.10:9400``。
         """
         selectors = []
         if instance:

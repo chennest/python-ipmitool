@@ -14,6 +14,9 @@ defineProps<{
 
 const emit = defineEmits<{ (e: 'navigate', p: PageKey): void }>()
 
+// 同源部署：直接显示浏览器当前访问的地址，不写死任何主机名/IP
+const accessAddress = window.location.host || '同源部署'
+
 const NAV: { key: PageKey; label: string; hint: string }[] = [
   { key: 'dashboard', label: '概览', hint: 'GPU 状态 · 温度 · 趋势' },
   { key: 'fans', label: '风扇控制', hint: '分配 · 调速 · 曲线' },
@@ -38,7 +41,7 @@ const NAV: { key: PageKey; label: string; hint: string }[] = [
       </div>
       <div class="leading-tight">
         <p class="text-[13px] font-semibold text-zinc-900">GPU 风扇控制台</p>
-        <p class="hidden text-[11px] text-zinc-400 md:block">pve02 · 2× Tesla T10</p>
+        <p class="hidden text-[11px] text-zinc-400 md:block">2× Tesla T10</p>
       </div>
     </div>
 
@@ -123,7 +126,7 @@ const NAV: { key: PageKey; label: string; hint: string }[] = [
           />
           {{ connected ? '实时连接' : '轮询模式' }}
         </p>
-        <p class="mt-1 text-zinc-400 tnum">192.168.6.7:8765</p>
+        <p class="mt-1 text-zinc-400 tnum">{{ accessAddress }}</p>
         <p
           v-if="emergency"
           class="mt-1.5 flex items-center gap-1.5 font-medium text-red-600"

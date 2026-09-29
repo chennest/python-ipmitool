@@ -1,9 +1,9 @@
 # 部署手册 —— GPU 风扇控制台
 
-> 目标机：**pve02**（ASRock Rack EPYCD8，192.168.6.7，BMC 2.20）
+> 目标机：你的 GPU 宿主机（下文 `<目标机>` / `<连接名>` 按实际替换）
 > 部署目录：`/opt/gpu-fan-console` ｜ 服务名：`gpu-fan-console.service`
-> 访问地址：`http://192.168.6.7:8765`
-> 最后核对：2026-09-28（当时线上 Python 3.13.5 / fastapi 0.141.1 / uvicorn 0.53.0）
+> 访问地址：`http://<目标机>:8765`
+> 参考环境：Python 3.13.5 / fastapi 0.141.1 / uvicorn 0.53.0（2026-09-28 核对）
 
 ---
 
@@ -37,11 +37,11 @@ FastAPI 挂 `StaticFiles` 一起发出去。所以：
 | 代码目录 | `/opt/gpu-fan-console` | 工作目录，service 的 `WorkingDirectory` |
 | 虚拟环境 | `/opt/gpu-fan-console/.venv` | Python 3.13.5，已装 fastapi / uvicorn / PyYAML |
 | 数据库 | `/opt/gpu-fan-console/app/data/fan-console.db` | **SQLite 是权威数据源**，升级时绝不能被覆盖 |
-| 运行时配置 | `/opt/gpu-fan-console/app/config.yaml` | 只在**首次运行**当初始值用；之后改了不算数 |
+| 运行时配置 | `/opt/gpu-fan-console/app/config.yaml` | 只在**首次运行**当初始值用；之后改了不算数。仓库里的版本是**模板**（示例地址），升级时解压要排除它（见 4.1 步骤 4） |
 | 主服务 | `/etc/systemd/system/gpu-fan-console.service` | `enabled` + `active`，`Restart=always` |
 | 看门狗 | `/etc/systemd/system/fan-watchdog.{service,timer}` | `enabled`，每 2 分钟查一次心跳 |
 | 心跳文件 | `/run/gpu-fan-console/heartbeat` | 主进程每轮写；过期则由看门狗强推 `8×0x00` 回落 |
-| 依赖的 exporter | ipmi_exporter `:9290`、node_exporter `:9100`、DCGM `:9400` | 都在 pve02 本机，都在跑 |
+| 依赖的 exporter | ipmi_exporter `:9290`、node_exporter `:9100`、DCGM `:9400` | 自备组件，装法不限，见 2.1 |
 
 ### 2.1 前置依赖：三个 exporter（自备组件，装法不限）
 
@@ -72,12 +72,6 @@ curl -s localhost:9290/metrics | grep ipmi_fan_speed_rpm | head -1
 curl -s localhost:9100/metrics | grep Tctl | head -1
 ```
 
-> **pve02 当前实况**（仅本机维护参考，不是规定）：dcgm-exporter 跑 docker
-> （`nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`，`--restart unless-stopped`，
-> `--gpus all`）；ipmi_exporter v1.10.1 与 node_exporter 跑 systemd，二进制在
-> `/usr/local/bin/`，node_exporter 带 `--collector.hwmon --collector.cpufreq`，
-> ipmi_exporter 以 root 运行。
-
 ---
 
 ## 3. 首次部署（换机器 / 重装时才需要）
@@ -87,7 +81,7 @@ curl -s localhost:9100/metrics | grep Tctl | head -1
 #    它们是控制台的全部数据源，没有这一步控速无依据
 
 # ① 建目录、建 venv
-ssh pve02
+ssh <目标机>
 mkdir -p /opt/gpu-fan-console
 cd /opt/gpu-fan-console
 python3 -m venv .venv
@@ -125,14 +119,17 @@ tar czf /tmp/gfc.tgz \
     -C . app
 
 # 3) 传上去
-agentsshcli upload pve02 /tmp/gfc.tgz /root/gfc.tgz     # 这条路现在常挂，见「坑 ②」
+agentsshcli upload <连接名> /tmp/gfc.tgz /root/gfc.tgz     # 这条路现在常挂，见「坑 ②」
 
 # 4) 远端解压 + 清旧前端产物（⚠️ 见「坑 ③」）
-agentsshcli exec pve02 "tar xzf /root/gfc.tgz -C /opt/gpu-fan-console"
+# 4) 远端解压 + 清旧前端产物（⚠️ 见「坑 ③」）
+#    已配置过的机器升级时排除 config.yaml —— 仓库里的版本是模板（示例地址），
+#    别把现场配好的 prometheus_url 等覆盖回示例值。首次部署才需要带上它。
+agentsshcli exec <连接名> "tar xzf /root/gfc.tgz -C /opt/gpu-fan-console --exclude='app/config.yaml'"
 
 # 5) 重启 + 自检
-agentsshcli exec pve02 "systemctl restart gpu-fan-console && sleep 4 && systemctl is-active gpu-fan-console"
-curl -s http://192.168.6.7:8765/api/status | head -c 300
+agentsshcli exec <连接名> "systemctl restart gpu-fan-console && sleep 4 && systemctl is-active gpu-fan-console"
+curl -s http://192.0.2.10:8765/api/status | head -c 300
 ```
 
 `deploy.sh` 就是把上面这套串起来，并且**内置了下面三个坑的绕过方案**。
@@ -188,10 +185,10 @@ split -b 30000 all.b64 ch_          # ⚠️ 单次命令行上限 32767 字符�
 i=0
 for f in ch_*; do
   [ $i -eq 0 ] && R='>' || R='>>'
-  agentsshcli exec pve02 "printf '%s' '$(cat $f)' $R /root/pkg.b64"
+  agentsshcli exec <连接名> "printf '%s' '$(cat $f)' $R /root/pkg.b64"
   i=$((i+1))
 done
-agentsshcli exec pve02 "base64 -d /root/pkg.b64 > /root/pkg.tgz"
+agentsshcli exec <连接名> "base64 -d /root/pkg.b64 > /root/pkg.tgz"
 ```
 > 只发前端时先 `gzip -9` 再 base64，体积能砍到 1/3，分片数从 25 降到 10。
 
@@ -214,9 +211,9 @@ find <dir> -type f ! -name '新文件1' ! -name '新文件2' -delete
 |---|---|---|
 | 服务活着 | `systemctl is-active gpu-fan-console` | `active` |
 | 看门狗在跑 | `systemctl list-timers fan-watchdog.timer` | 有下次触发时间 |
-| 页面 200 | `curl -s -o /dev/null -w '%{http_code}' http://192.168.6.7:8765/` | `200` |
-| 静态资源对得上 | `curl -s http://192.168.6.7:8765/ \| grep -o 'index-[A-Za-z0-9_-]*\.\(js\|css\)'` | 与本地 `ls app/static/assets` 一致 |
-| 曲线在控速 | `curl -s http://192.168.6.7:8765/api/status` | 受控位 `duty` 有值、`temperature` 与 GPU 温度对得上 |
+| 页面 200 | `curl -s -o /dev/null -w '%{http_code}' http://192.0.2.10:8765/` | `200` |
+| 静态资源对得上 | `curl -s http://192.0.2.10:8765/ \| grep -o 'index-[A-Za-z0-9_-]*\.\(js\|css\)'` | 与本地 `ls app/static/assets` 一致 |
+| 曲线在控速 | `curl -s http://192.0.2.10:8765/api/status` | 受控位 `duty` 有值、`temperature` 与 GPU 温度对得上 |
 | 数据没丢 | 打开设置页 | 模式 / 管控 GPU / 分配关系都是部署前的样子 |
 | 启动顺序对 | `journalctl -u gpu-fan-console -n 30` | 先「已应用数据库里的设置」再「已应用数据库里的分配」 |
 | 回落动作在 | 同上，搜「安全护栏已激活」 | 有这行才说明退出时会回退 auto |
@@ -232,9 +229,9 @@ git checkout <上一个好提交>
 ./deploy.sh
 
 # 数据回滚（SQLite 有备份时）
-agentsshcli exec pve02 "systemctl stop gpu-fan-console"
-agentsshcli exec pve02 "cp /root/fan-console.db.bak /opt/gpu-fan-console/app/data/fan-console.db"
-agentsshcli exec pve02 "systemctl start gpu-fan-console"
+agentsshcli exec <连接名> "systemctl stop gpu-fan-console"
+agentsshcli exec <连接名> "cp /root/fan-console.db.bak /opt/gpu-fan-console/app/data/fan-console.db"
+agentsshcli exec <连接名> "systemctl start gpu-fan-console"
 ```
 
 **最坏情况的保险**：不管服务死没死，都可以直接让 BMC 接管 ——
@@ -242,7 +239,7 @@ agentsshcli exec pve02 "systemctl start gpu-fan-console"
 ```bash
 # 远端执行（把 8 个字节全填 0x00 = 全交回 BMC 自动档）
 ipmitool raw 0x3a 0x01 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-# 宿主都起不来时：从 BMC 独立地址 192.168.6.8 走，凭据 admin/admin
+# 宿主都起不来时：从 BMC 独立管理地址走（BMC 与宿主 OS 相互独立，凭据自行保管，切勿写进公开文档）
 ```
 
 ---

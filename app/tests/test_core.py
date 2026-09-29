@@ -338,7 +338,7 @@ class TestCurvePreview(unittest.TestCase):
 
 
 class TestPrometheusParsing(unittest.TestCase):
-    """Prometheus 文本解析 —— 用 pve02 上抓到的真实格式。"""
+    """Prometheus 文本解析 —— 用 真实设备抓到的格式。"""
 
     SAMPLE = """\
 # HELP DCGM_FI_DEV_GPU_TEMP GPU temperature (in C).
@@ -428,7 +428,7 @@ DCGM_FI_DEV_FB_FREE{gpu="0",UUID="GPU-e49ed30f-f0f4-dc17-0225-2c1235602b39"} 151
 class TestSdrFanParsing(unittest.TestCase):
     """``ipmitool sdr type fan`` 输出解析。
 
-    样例取自 2026-09-28 在 pve02 上的真实输出 —— 这组用例的由来就是一个
+    样例取自 2026-09-28 在真实设备上的输出 —— 这组用例的由来就是一个
     真实 bug：最初以为「第二列是读数」，结果把传感器 ID ``62h`` 当成了 RPM。
     """
 
@@ -499,7 +499,7 @@ class TestSdrTemperatureParsing(unittest.TestCase):
 class TestFanReaderIpmitoolFallback(unittest.TestCase):
     """ipmitool 兜底路径 —— 必须跳过未接的风扇位。
 
-    样例是 2026-09-28 在 pve02 上抓的真实输出：14 个风扇传感器位里只有
+    样例是 2026-09-28 在真实设备上抓的输出：14 个风扇传感器位里只有
     4 个有读数，其余全是 ``No Reading``。不跳过的话界面上会凭空多出
     10 个空风扇位。
     """

@@ -166,22 +166,22 @@ cat logs/fancontroller.log.YYYY-MM-DD
 
 ```yaml
 prometheus:
-  base_url: "http://192.168.6.31:30091"
+  base_url: "http://192.0.2.20:30091"
   timeout: 10
 
 servers:
   - type: epycd8
     prometheus:                          # per-server 覆盖（多机场景必需）
-      fan_instance:  "192.168.6.7:9290"  # 风扇转速 ← ipmi_exporter
-      temp_instance: "192.168.6.7:9100"  # CPU 温度  ← node_exporter
-      gpu_instance:  "192.168.6.7:9400"  # GPU 温度  ← DCGM exporter
+      fan_instance:  "192.0.2.10:9290"  # 风扇转速 ← ipmi_exporter
+      temp_instance: "192.0.2.10:9100"  # CPU 温度  ← node_exporter
+      gpu_instance:  "192.0.2.10:9400"  # GPU 温度  ← DCGM exporter
 ```
 
-| 数据 | 指标 | instance（pve02 实测） |
+| 数据 | 指标 | instance（实测示例） |
 |------|------|----------------------|
-| 风扇转速 | `ipmi_fan_speed_rpm{name="FRNT_FAN1"}` | `192.168.6.7:9290` |
-| CPU 温度 | `node_hwmon_temp_celsius`（按语义标签 `label="Tctl"` 过滤） | `192.168.6.7:9100` |
-| GPU 温度 | `DCGM_FI_DEV_GPU_TEMP` | `192.168.6.7:9400` |
+| 风扇转速 | `ipmi_fan_speed_rpm{name="FRNT_FAN1"}` | `192.0.2.10:9290` |
+| CPU 温度 | `node_hwmon_temp_celsius`（按语义标签 `label="Tctl"` 过滤） | `192.0.2.10:9100` |
+| GPU 温度 | `DCGM_FI_DEV_GPU_TEMP` | `192.0.2.10:9400` |
 
 ⚠️ **三个 instance 对应三个不同的 exporter，混用会直接查不到数据。** 配置项
 分别为 `fan_instance` / `temp_instance` / `gpu_instance`（笼统的 `instance` 仍
@@ -219,7 +219,7 @@ servers:
 
 本仓库真正在用的是 `app/`（FastAPI 控制台）+ `frontend/`（Vue3 前端）：
 
-- 控速依据是 **GPU 温度**（DCGM），目标机 pve02 的机箱风扇，写 `ipmitool raw 0x3a 0x01`
+- 控速依据是 **GPU 温度**（DCGM），目标机的机箱风扇，写 `ipmitool raw 0x3a 0x01`
 - 运行时状态（模式 / 管控 GPU / 分配关系 / 审计）**全部落 SQLite**，配置文件只是首次运行的种子
 
 **实时数据源：三个外部 exporter（自备组件，不随仓库提供，装法不限）**

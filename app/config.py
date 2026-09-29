@@ -56,11 +56,11 @@ class SourcesConfig(BaseModel):
     # 实时读数**不走**这里，因为 Prometheus 是 30s 快照（见 CLAUDE.md）。
     # 但历史曲线恰恰是 Prometheus 的主场，所以单独配一套。
     prometheus_url: str | None = None
-    #: GPU 温度在 Prometheus 里的 instance 标签，如 ``192.168.6.7:9400``
+    #: GPU 温度在 Prometheus 里的 instance 标签，如 ``192.0.2.10:9400``
     prometheus_gpu_instance: str | None = None
-    #: CPU 温度（node_exporter 的 hwmon / k10temp）的 instance 标签，如 ``192.168.6.7:9100``
+    #: CPU 温度（node_exporter 的 hwmon / k10temp）的 instance 标签，如 ``192.0.2.10:9100``
     prometheus_node_instance: str | None = None
-    #: 风扇转速的 instance 标签，如 ``192.168.6.7:9290``
+    #: 风扇转速的 instance 标签，如 ``192.0.2.10:9290``
     prometheus_fan_instance: str | None = None
 
 

@@ -186,7 +186,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="GPU Fan Console",
-    description="pve02 GPU 温度联动风扇控制台（单机应用）",
+    description="GPU 温度联动风扇控制台（单机应用）",
     version=__version__,
     lifespan=lifespan,
 )

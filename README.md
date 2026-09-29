@@ -134,7 +134,7 @@ python -m unittest discover -s app/tests -t . -v
 1. **后端单测**：`python -m unittest`（Python 3.13，对齐线上）
 2. **前端构建**：`npm ci && npm run build`（自带 vue-tsc 全量类型检查）
 3. **部署包**：产出 `gpu-fan-console-app.tgz`（成员路径 `app/...`，排除 `app/data`），
-   挂在 workflow 的 Artifacts 里——下载后传到 pve02 解压重启即可，本机无需装 Node
+   挂在 workflow 的 Artifacts 里——下载后传到目标机解压重启即可，本机无需装 Node
 
 推送 main 时额外构建**双平台独立可执行文件**（PyInstaller）；打 `v*` tag 自动创建
 GitHub Release 并附上全部产物：
@@ -201,7 +201,7 @@ alert:                      # 邮件告警（可选，默认关闭）
   max_failed_attempts: 3
   email: { ... }            # SMTP 配置，支持多收件人、1 小时防轰炸
 prometheus:
-  base_url: "http://192.168.6.31:30091"
+  base_url: "http://192.0.2.20:30091"
 servers:
   - type: dell730
     ip: "192.168.71.90"
