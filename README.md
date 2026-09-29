@@ -32,7 +32,8 @@ scripts for Dell PowerEdge servers.**
 通过 `ipmitool raw 0x3a 0x01` 写给 BMC。
 
 - **数据采集**：GPU 温度走本地 DCGM exporter（`:9400`），风扇转速走 ipmi_exporter
-  （`:9290`），直连 exporter 读当下值；历史趋势另走 Prometheus。DCGM 不可用时降级 `nvidia-smi` 兜底
+  （`:9290`），CPU 温度走 node_exporter（`:9100`，需 `--collector.hwmon`），直连 exporter 读当下值；
+  历史趋势另走 Prometheus。DCGM 不可用时降级 `nvidia-smi` 兜底
 - **控制曲线**：分段折线 + 滞回带（升温立即生效，降温须跌出滞回带才降档，
   避免「直升机效应」）。界面上可编辑曲线并**试算预览**（`/api/curve/preview` 走真实算法）
 - **三种模式**：自动调档（按曲线）/ 手动定速（界面指定占空比）/ BMC 自动档（交还 BMC）

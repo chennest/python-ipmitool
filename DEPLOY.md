@@ -43,11 +43,37 @@ FastAPI 挂 `StaticFiles` 一起发出去。所以：
 | 心跳文件 | `/run/gpu-fan-console/heartbeat` | 主进程每轮写；过期则由看门狗强推 `8×0x00` 回落 |
 | 依赖的 exporter | ipmi_exporter `:9290`、node_exporter `:9100`、DCGM `:9400` | 都在 pve02 本机，都在跑 |
 
+### 2.1 三个 exporter 是怎么装的（pve02 实况，重装时照抄）
+
+控制台的**全部数据源就是这三个 exporter**（实时读数直连 `/metrics`，不走 Prometheus）。
+没有它们，控制台进程照样能起（DCGM 挂了会降级 `nvidia-smi` 兜底），但控速依据为零——
+所以**首次部署时这一步要在装控制台之前完成**。
+
+| exporter | 部署形态 | 端口 | 提供的数据 |
+|---|---|---|---|
+| dcgm-exporter | docker 容器，`nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`，`--restart unless-stopped`，需宿主已装 NVIDIA 驱动并以 `--gpus all` 启动 | 9400 | GPU 温度 / 功率 / 利用率 / SM 频率 |
+| ipmi_exporter | systemd 服务，`/usr/local/bin/ipmi_exporter --web.listen-address=:9290`（v1.10.1），**必须 root**（in-band 读 `/dev/ipmi0`，依赖 openipmi 驱动） | 9290 | 风扇转速 `ipmi_fan_speed_rpm` |
+| node_exporter | systemd 服务，`/usr/local/bin/node_exporter --collector.hwmon --collector.cpufreq` | 9100 | CPU 温度 `node_hwmon_temp_celsius`（`label="Tctl"`） |
+
+⚠️ node_exporter **不带 `--collector.hwmon` 就没有 hwmon 指标**，CPU 温度直接失明——
+这个 flag 是这里的关键，升级二进制时别丢。
+
+装完自检三连（各返回至少一行数据才算就位）：
+
+```bash
+curl -s localhost:9400/metrics | grep DCGM_FI_DEV_GPU_TEMP | head -1
+curl -s localhost:9290/metrics | grep ipmi_fan_speed_rpm | head -1
+curl -s localhost:9100/metrics | grep Tctl | head -1
+```
+
 ---
 
 ## 3. 首次部署（换机器 / 重装时才需要）
 
 ```bash
+# ⓪ 三个 exporter 先就位（dcgm-exporter / ipmi_exporter / node_exporter，见 2.1）
+#    它们是控制台的全部数据源，没有这一步控速无依据
+
 # ① 建目录、建 venv
 ssh pve02
 mkdir -p /opt/gpu-fan-console
