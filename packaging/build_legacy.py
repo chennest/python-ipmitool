@@ -15,6 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ENTRIES = ["fancontroller", "fancontroller_once"]
 
+# Windows 控制台可能是 cp1252/GBK，打印中文会炸 —— 统一按 UTF-8 输出
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def main() -> int:
     for name in ENTRIES:

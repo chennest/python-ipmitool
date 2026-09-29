@@ -19,6 +19,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NAME = "gpu-fan-console"
 
+# Windows 控制台可能是 cp1252/GBK，打印中文会炸 —— 统一按 UTF-8 输出
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+def make_archive(exe_dir: Path) -> Path:
+    """把整目录打成对应平台的分发压缩包（Windows → zip / POSIX → tar.gz）。
+
+    放在 Python 里做而不是 workflow 里调 tar/PowerShell：跨平台行为一致，
+    zip 内条目用正斜杠（Compress-Archive 的反斜杠条目在部分解压器下会显示异常）。
+    """
+    import tarfile
+    import zipfile
+
+    suffix = "windows-x64.zip" if os.name == "nt" else "linux-x64.tar.gz"
+    out = ROOT / "dist" / f"{NAME}-{suffix}"
+    if out.exists():
+        out.unlink()
+    if suffix.endswith(".zip"):
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(exe_dir.rglob("*")):
+                zf.write(path, path.relative_to(exe_dir.parent).as_posix())
+    else:
+        with tarfile.open(out, "w:gz") as tf:
+            for path in sorted(exe_dir.rglob("*")):
+                tf.add(path, arcname=path.relative_to(exe_dir.parent).as_posix())
+    return out
+
 
 def main() -> int:
     static_dir = ROOT / "app" / "static"
@@ -52,6 +81,7 @@ def main() -> int:
     exe_dir = ROOT / "dist" / NAME
     shutil.copy2(ROOT / "app" / "config.yaml", exe_dir / "config.yaml")
     print(f"构建完成: {exe_dir}")
+    print(f"分发包: {make_archive(exe_dir)}")
     return 0
 
 

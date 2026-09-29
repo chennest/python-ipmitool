@@ -69,6 +69,8 @@ jobs:
           - os: ubuntu-latest
           - os: windows-latest
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: utf-8   # Windows runner 控制台 cp1252，防中文输出炸编码
     steps:
       - uses: actions/checkout@v4
 
@@ -82,20 +84,12 @@ jobs:
         with:
           python-version: "3.13"
 
+      # build_console.py 构建完直接产出 dist/gpu-fan-console-windows-x64.zip
+      # 或 dist/gpu-fan-console-linux-x64.tar.gz（zipfile/tarfile 实现，跨平台一致）
       - name: 构建控制台可执行
         run: |
           pip install -r app/requirements.txt pyinstaller
           python packaging/build_console.py
-
-      - name: 打包分发（Windows → zip / Linux → tar.gz）
-        shell: bash
-        run: |
-          cd dist
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            tar -a -cf gpu-fan-console-windows-x64.zip gpu-fan-console
-          else
-            tar czf gpu-fan-console-linux-x64.tar.gz gpu-fan-console
-          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,6 +107,8 @@ jobs:
           - os: ubuntu-latest
           - os: windows-latest
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
