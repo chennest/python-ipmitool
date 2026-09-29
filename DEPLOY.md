@@ -43,22 +43,28 @@ FastAPI 挂 `StaticFiles` 一起发出去。所以：
 | 心跳文件 | `/run/gpu-fan-console/heartbeat` | 主进程每轮写；过期则由看门狗强推 `8×0x00` 回落 |
 | 依赖的 exporter | ipmi_exporter `:9290`、node_exporter `:9100`、DCGM `:9400` | 都在 pve02 本机，都在跑 |
 
-### 2.1 三个 exporter 是怎么装的（pve02 实况，重装时照抄）
+### 2.1 前置依赖：三个 exporter（自备组件，装法不限）
 
-控制台的**全部数据源就是这三个 exporter**（实时读数直连 `/metrics`，不走 Prometheus）。
-没有它们，控制台进程照样能起（DCGM 挂了会降级 `nvidia-smi` 兜底），但控速依据为零——
-所以**首次部署时这一步要在装控制台之前完成**。
+控制台的**全部实时数据源就是这三个 exporter**（直连各自 `/metrics`，不走 Prometheus）。
+它们不随本仓库提供，**需要自己安装**——docker、systemd、裸二进制、发行版包管理器，
+怎么装都可以，达标标准与项目地址如下：
 
-| exporter | 部署形态 | 端口 | 提供的数据 |
+| 组件 | 项目地址 | 默认端口 | 必须提供 |
 |---|---|---|---|
-| dcgm-exporter | docker 容器，`nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`，`--restart unless-stopped`，需宿主已装 NVIDIA 驱动并以 `--gpus all` 启动 | 9400 | GPU 温度 / 功率 / 利用率 / SM 频率 |
-| ipmi_exporter | systemd 服务，`/usr/local/bin/ipmi_exporter --web.listen-address=:9290`（v1.10.1），**必须 root**（in-band 读 `/dev/ipmi0`，依赖 openipmi 驱动） | 9290 | 风扇转速 `ipmi_fan_speed_rpm` |
-| node_exporter | systemd 服务，`/usr/local/bin/node_exporter --collector.hwmon --collector.cpufreq` | 9100 | CPU 温度 `node_hwmon_temp_celsius`（`label="Tctl"`） |
+| dcgm-exporter | <https://github.com/NVIDIA/dcgm-exporter> | 9400 | `DCGM_FI_DEV_GPU_TEMP`（GPU 温度；顺带 SM 频率/功率/利用率）。宿主需已装 NVIDIA 驱动 |
+| ipmi_exporter | <https://github.com/prometheus-community/ipmi_exporter> | 9290 | `ipmi_fan_speed_rpm`（风扇转速）。in-band 读 `/dev/ipmi0`，需要 root + openipmi 驱动 |
+| node_exporter | <https://github.com/prometheus/prometheus/tree/master/node_exporter> | 9100 | `node_hwmon_temp_celsius`（CPU 温度）。**启动必须带 `--collector.hwmon`**，否则没有 hwmon 指标 |
 
-⚠️ node_exporter **不带 `--collector.hwmon` 就没有 hwmon 指标**，CPU 温度直接失明——
-这个 flag 是这里的关键，升级二进制时别丢。
+与装法无关的三条硬性达标标准：
 
-装完自检三连（各返回至少一行数据才算就位）：
+1. 三个 `/metrics` 各自能 grep 出上表的指标（自检命令见下）
+2. ipmi_exporter 进程能读到本机 `/dev/ipmi0`
+3. dcgm-exporter 不可用时控制台自动降级 `nvidia-smi` 兜底，但只有 GPU 温度，指标口径缩水
+
+端口不是死的：默认端口只是约定，改了端口就把 `app/config.yaml` 里对应的
+`*_endpoint`（实时读数）和 `prometheus_*_instance`（历史趋势）一起改掉。
+
+自检三连（各返回至少一行数据才算就位）：
 
 ```bash
 curl -s localhost:9400/metrics | grep DCGM_FI_DEV_GPU_TEMP | head -1
@@ -66,12 +72,18 @@ curl -s localhost:9290/metrics | grep ipmi_fan_speed_rpm | head -1
 curl -s localhost:9100/metrics | grep Tctl | head -1
 ```
 
+> **pve02 当前实况**（仅本机维护参考，不是规定）：dcgm-exporter 跑 docker
+> （`nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`，`--restart unless-stopped`，
+> `--gpus all`）；ipmi_exporter v1.10.1 与 node_exporter 跑 systemd，二进制在
+> `/usr/local/bin/`，node_exporter 带 `--collector.hwmon --collector.cpufreq`，
+> ipmi_exporter 以 root 运行。
+
 ---
 
 ## 3. 首次部署（换机器 / 重装时才需要）
 
 ```bash
-# ⓪ 三个 exporter 先就位（dcgm-exporter / ipmi_exporter / node_exporter，见 2.1）
+# ⓪ 自备三个 exporter（dcgm-exporter / ipmi_exporter / node_exporter，装法不限，见 2.1）
 #    它们是控制台的全部数据源，没有这一步控速无依据
 
 # ① 建目录、建 venv

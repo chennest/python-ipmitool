@@ -221,5 +221,18 @@ servers:
 
 - 控速依据是 **GPU 温度**（DCGM），目标机 pve02 的机箱风扇，写 `ipmitool raw 0x3a 0x01`
 - 运行时状态（模式 / 管控 GPU / 分配关系 / 审计）**全部落 SQLite**，配置文件只是首次运行的种子
+
+**实时数据源：三个外部 exporter（自备组件，不随仓库提供，装法不限）**
+
+| 数据 | exporter | 项目地址 | 指标 | 默认端口 |
+|---|---|---|---|---|
+| GPU 温度/功率/频率 | dcgm-exporter | <https://github.com/NVIDIA/dcgm-exporter> | `DCGM_FI_DEV_GPU_TEMP` 等 | 9400 |
+| 风扇转速 | ipmi_exporter | <https://github.com/prometheus-community/ipmi_exporter> | `ipmi_fan_speed_rpm` | 9290 |
+| CPU 温度 | node_exporter | <https://github.com/prometheus/prometheus/tree/master/node_exporter> | `node_hwmon_temp_celsius`（`label="Tctl"`；启动必须带 `--collector.hwmon`） | 9100 |
+
+端点在 `app/config.yaml` 的 `sources.*_endpoint`（实时读数）与 `prometheus_*_instance`
+（仅 `/api/history` 用）可配；DCGM 不可用时 `sensors.py` 降级 `nvidia-smi` 兜底。
+ipmi_exporter in-band 读 `/dev/ipmi0` 需要 root。安装/自检详见 [`DEPLOY.md`](./DEPLOY.md) 2.1 节。
+
 - 部署方式、踩坑、回滚、验证清单 → **见 [`DEPLOY.md`](./DEPLOY.md)**，一键脚本 `./deploy.sh`
 
