@@ -27,11 +27,11 @@ EPYCD8             ``raw 0x3a 0x01 b1..b8``                   ``raw 0x3a 0x01 0x
     b1  CPU1_FAN1
     b2  --（保留）
     b3  REAR_FAN1
-    b4  REAR_FAN2   ← pve02 用于 Tesla T10 散热
-    b5  FRNT_FAN1   ← pve02 用于 Tesla T10 散热
-    b6  FRNT_FAN2   （pve02 未接风扇）
-    b7  FRNT_FAN3   （pve02 未接风扇）
-    b8  FRNT_FAN4   （pve02 未接风扇）
+    b4  REAR_FAN2   ← 宿主机用于 Tesla T10 散热
+    b5  FRNT_FAN1   ← 宿主机用于 Tesla T10 散热
+    b6  FRNT_FAN2   （未接风扇）
+    b7  FRNT_FAN3   （未接风扇）
+    b8  FRNT_FAN4   （未接风扇）
 """
 
 from .base_controller import IPMIFanController
@@ -94,7 +94,7 @@ class Epycd8FanController(IPMIFanController):
         字段名，在本机型上承载的其实是 GPU 温度。
 
         数据源同样是 Prometheus —— DCGM exporter 已接入
-        （job ``dcgm-exporter-pve02``），指标 ``DCGM_FI_DEV_GPU_TEMP``。
+        （job 名自定义，如 ``dcgm-exporter``），指标 ``DCGM_FI_DEV_GPU_TEMP``。
 
         Returns:
             str | None: PromQL；未配置 ``gpu_instance`` 时返回 ``None``。
@@ -103,7 +103,7 @@ class Epycd8FanController(IPMIFanController):
         if not instance:
             self.logger.error(
                 f"服务器 {self.ip}: 未配置 prometheus.gpu_instance，无法定位 "
-                f"DCGM 数据（例: 192.168.6.7:9400）"
+                f"DCGM 数据（例: 192.0.2.10:9400）"
             )
             return None
         return f'DCGM_FI_DEV_GPU_TEMP{{instance="{instance}"}}'

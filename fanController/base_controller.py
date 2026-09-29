@@ -21,7 +21,7 @@ class IPMIFanController:
             auto (bool): 是否自动模式，True为自动模式，False为手动模式。
             alert_config (dict, optional): 告警配置字典。
             prometheus_config (dict, optional): Prometheus 查询配置，形如
-                ``{'base_url': 'http://192.168.6.31:30091', 'instance': '192.168.6.7:9290'}``。
+                ``{'base_url': 'http://192.0.2.20:30091', 'instance': '192.0.2.10:9290'}``。
                 风扇转速统一从这里取（见 :meth:`get_fan_rotational_speed`）。
         """
         self.platform_system = platform.system()
@@ -130,11 +130,11 @@ class IPMIFanController:
         ⚠️ **不同数据源的 instance 是不同的**，因为它们是各自的 exporter：
 
         ============  ==================  ==========================
-        数据          指标                instance（pve02 实测）
+        数据          指标                instance（实测示例）
         ============  ==================  ==========================
-        风扇转速       ipmi_fan_speed_rpm  ``192.168.6.7:9290``
-        CPU 温度       node_hwmon_temp_*   ``192.168.6.7:9100``
-        GPU 温度       DCGM_FI_DEV_*       ``192.168.6.7:9400``
+        风扇转速       ipmi_fan_speed_rpm  ``192.0.2.10:9290``
+        CPU 温度       node_hwmon_temp_*   ``192.0.2.10:9100``
+        GPU 温度       DCGM_FI_DEV_*       ``192.0.2.10:9400``
         ============  ==================  ==========================
 
         混用一个 ``instance`` 会直接查不到数据 —— 这个坑 2026-09-28 实现时踩到。

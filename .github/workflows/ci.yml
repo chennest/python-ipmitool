@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"   # 对齐 pve02 线上版本
+          python-version: "3.13"   # 对齐线上生产版本
 
       - name: 后端单元测试
         run: |

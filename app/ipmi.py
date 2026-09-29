@@ -23,8 +23,8 @@
     b1  CPU1_FAN1
     b2  --（保留）
     b3  REAR_FAN1
-    b4  REAR_FAN2   ← pve02 用于 Tesla T10 散热
-    b5  FRNT_FAN1   ← pve02 用于 Tesla T10 散热
+    b4  REAR_FAN2   ← 宿主机用于 Tesla T10 散热
+    b5  FRNT_FAN1   ← 宿主机用于 Tesla T10 散热
     b6  FRNT_FAN2   （未接风扇）
     b7  FRNT_FAN3   （未接风扇）
     b8  FRNT_FAN4   （未接风扇）
@@ -148,9 +148,9 @@ def encode_duty(duty: int | None) -> int:
 class IPMIClient:
     """ipmitool 封装。
 
-    默认走**本地 in-band**（``/dev/ipmi0``，需要 root），这是 pve02 上的推荐用法：
+    默认走**本地 in-band**（``/dev/ipmi0``，需要 root），这是推荐用法：
     链路最短、无网络依赖。也支持 ``lanplus`` 远程模式指向 BMC 独立地址
-    （``192.168.6.8``），用于宿主系统起不来时的带外兜底。
+    （``192.0.2.11``），用于宿主系统起不来时的带外兜底。
     """
 
     def __init__(
