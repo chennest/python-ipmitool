@@ -11,8 +11,8 @@
 
 ```bash
 # 在项目根目录（Windows Git Bash）
-./deploy.sh              # 全量：后端 + 前端，自动重启服务并自检
-./deploy.sh --static-only  # 只更新前端（不改后端、不重启服务）
+CONN=<连接名> ./deploy.sh   # 全量：后端 + 前端，自动重启服务并自检
+CONN=<连接名> ./deploy.sh --static-only  # 只更新前端（不改后端、不重启服务）
 ```
 
 下面是人话版说明，出问题时看这里。
@@ -139,7 +139,7 @@ curl -s http://192.0.2.10:8765/api/status | head -c 300
 后端没动时不用重启进程 —— `StaticFiles` 每次请求读盘，`index.html` 也不会被缓存：
 
 ```bash
-./deploy.sh --static-only
+CONN=<连接名> ./deploy.sh --static-only
 ```
 
 > ⚠️ **别手动只拷 `index-xxxx.js`**。文件名带**内容 hash**，源码改一行文件名就变。
@@ -226,7 +226,7 @@ find <dir> -type f ! -name '新文件1' ! -name '新文件2' -delete
 # 代码回滚
 git log --oneline -5
 git checkout <上一个好提交>
-./deploy.sh
+CONN=<连接名> ./deploy.sh
 
 # 数据回滚（SQLite 有备份时）
 agentsshcli exec <连接名> "systemctl stop gpu-fan-console"
