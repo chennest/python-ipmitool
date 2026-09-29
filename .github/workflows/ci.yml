@@ -156,7 +156,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l artifacts
+          # 本 job 没有 checkout（无 .git），必须显式 --repo，否则 gh 推断不出仓库
           gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "gpu-fan-console $GITHUB_REF_NAME" \
             --generate-notes \
-            || gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+            || gh release upload "$GITHUB_REF_NAME" artifacts/* \
+                 --repo "$GITHUB_REPOSITORY" --clobber
