@@ -222,7 +222,51 @@ servers:
 - 控速依据是 **GPU 温度**（DCGM），目标机的机箱风扇，写 `ipmitool raw 0x3a 0x01`
 - 运行时状态（模式 / 管控 GPU / 分配关系 / 审计）**全部落 SQLite**，配置文件只是首次运行的种子
 
-**实时数据源：三个外部 exporter（自备组件，不随仓库提供，装法不限）**
+### 控制台模块地图（`app/`）
+
+| 模块 | 职责 |
+|---|---|
+| `main.py` | 入口：单进程 = 控制回路 + API + 静态托管；`STATIC_DIR` 来自 `runtime.py` |
+| `api.py` | REST + WebSocket（`/api/status`、`/api/curve/preview`、`/ws` 等） |
+| `controller.py` | 控制回路（默认 15s 一轮，可配） |
+| `curve.py` | 分段曲线 + 滞回（升温立即生效，降温须跌出滞回带） |
+| `ipmi.py` | `raw 0x3a 0x01` 命令族与占空比编码 |
+| `sensors.py` | DCGM / ipmi_exporter / node_exporter / nvidia-smi 兜底 / Prometheus 历史 |
+| `safety.py` | 安全护栏（退出回退 BMC 自动档 + atexit + 心跳） |
+| `store.py` | SQLite（`data/fan-console.db`，唯一权威数据源） |
+| `config.py` | pydantic 配置模型；`load_config` 缺文件时优雅降级为默认值 |
+| `runtime.py` | **资源定位中枢**：源码运行根 = `app/` 包目录；PyInstaller 冻结运行根 = exe 所在目录。config / DB / static / heartbeat 四处路径全部从这里取——**改路径相关代码时只动这里，别在各自模块里再写 `__file__` 推导** |
+
+### 打包与 CI/CD
+
+**CI**（`.github/workflows/ci.yml`，推 main / PR / 打 `v*` tag 触发）：
+
+1. `test-and-build`：后端单测（Python 3.13）→ 前端 `npm ci && npm run build`（含 vue-tsc 全量类型检查）→ 打部署包 `gpu-fan-console-app.tgz`（成员路径 `app/...`，排除 `app/data`）挂 Artifacts
+2. `build-console` / `build-legacy`（非 PR 才跑）：PyInstaller 双平台可执行；分发压缩包由 `packaging/build_console.py` 内置生成（zipfile/tarfile，**不要**在 workflow 里用 tar/PowerShell 打——Windows runner 的 cp1252 控制台编不了中文输出，打包脚本必须 `sys.stdout.reconfigure(encoding="utf-8")`）
+3. `release`（打 tag 才跑）：`gh release create` 自动发版附全部产物；**必须显式 `--repo "$GITHUB_REPOSITORY"`**（该 job 无 checkout，gh 推断不出仓库）
+
+**冻结（PyInstaller）相关**：
+
+- 打包入口 `entry_console.py`（控制台 onedir）、`packaging/build_console.py` / `packaging/build_legacy.py`（旧脚本 onefile）
+- 冻结后**可变资源必须落 exe 旁**（`_MEIPASS` 每次启动清空）：config.yaml / `data/` / heartbeat 由 `runtime.py` 定位到 exe 旁；旧脚本 `fancontroller(.once).py` 的 `_app_directory()` 同理
+- 本机已实测：控制台 exe（API/静态页/SQLite 落位）、旧脚本 exe（缺配置报错、空配置正常退出）
+
+### 部署
+
+- 部署方式、踩坑（tar 路径对齐 / upload 分片 base64 / 远端 rm 黑名单）、回滚、验证清单 → **[`DEPLOY.md`](./DEPLOY.md)**
+- 一键脚本 `./deploy.sh`：**`CONN=<ssh连接名>` 必填**，可选 `REMOTE_DIR` / `SERVICE` / `URL`；
+  脚本打包时排除 `app/data` 与 `app/config.yaml`
+- 服务器直连 GitHub 可用时，更快的更新方式：直接 `curl -L` Release 页的
+  `gpu-fan-console-app.tgz`，免去本地构建与分片上传（v2.0 实测可行）
+- ⚠️ 升级已配置的机器时，解压必须 `--exclude='app/config.yaml'`——仓库里的
+  config.yaml 是**模板**（示例地址），覆盖会毁掉现场配置
+
+### 仓库约定
+
+- **公开仓库，严禁出现真实内网 IP / 主机名 / 凭据**。示例地址一律用 RFC 5737
+  文档段（192.0.2.0/24 等）；写文档、注释、测试样例时同样遵守
+- `config.yaml` 按模板维护；`README_EN.md` 与中文版结构对齐
+- 实时数据源：三个外部 exporter（自备组件，装法不限）：
 
 | 数据 | exporter | 项目地址 | 指标 | 默认端口 |
 |---|---|---|---|---|
@@ -233,6 +277,4 @@ servers:
 端点在 `app/config.yaml` 的 `sources.*_endpoint`（实时读数）与 `prometheus_*_instance`
 （仅 `/api/history` 用）可配；DCGM 不可用时 `sensors.py` 降级 `nvidia-smi` 兜底。
 ipmi_exporter in-band 读 `/dev/ipmi0` 需要 root。安装/自检详见 [`DEPLOY.md`](./DEPLOY.md) 2.1 节。
-
-- 部署方式、踩坑、回滚、验证清单 → **见 [`DEPLOY.md`](./DEPLOY.md)**，一键脚本 `./deploy.sh`
 

@@ -1,4 +1,4 @@
-[English Readme](./README_EN.md)（英文版目前只覆盖旧版脚本，尚未同步新控制台）
+[English Readme](./README_EN.md)
 
 # python-ipmitool
 
@@ -119,8 +119,8 @@ python -m unittest discover -s app/tests -t . -v
 **日常更新一条命令**：
 
 ```bash
-./deploy.sh                 # 全量：后端 + 前端，自动重启服务并自检
-./deploy.sh --static-only   # 只更新前端（不改后端、不重启服务）
+CONN=<连接名> ./deploy.sh   # 全量：后端 + 前端，自动重启服务并自检
+CONN=<连接名> ./deploy.sh --static-only  # 只更新前端（不改后端、不重启服务）
 ```
 
 首次部署、踩坑记录、回滚与验证清单见 **[DEPLOY.md](./DEPLOY.md)**。
@@ -246,7 +246,7 @@ Linux 长期运行建议配置为 systemd 服务（`/etc/systemd/system/fancontr
 
 - [DEPLOY.md](./DEPLOY.md) —— GPU 风扇控制台部署手册（一键脚本、踩坑、回滚、验证清单）
 - [CLAUDE.md](./CLAUDE.md) —— 仓库架构说明（新旧两套的实现细节、加新机型的方法）
-- [README_EN.md](./README_EN.md) —— 英文说明（仅旧版脚本）
+- [README_EN.md](./README_EN.md) —— 英文说明
 
 ## 贡献与反馈
 
