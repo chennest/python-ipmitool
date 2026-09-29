@@ -16,12 +16,20 @@ IPMI 风扇控制器 - 单次执行模式
 """
 
 import os
+import sys
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import yaml
 
 from fanController.dell730_controller import Dell730FanController
 from fanController.epycd8_controller import Epycd8FanController
+
+
+def _app_directory() -> str:
+    """配置与日志所在目录（冻结运行时取 exe 所在目录，理由同 fancontroller.py）。"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 #: 机型 → 控制器类 的映射（与 fancontroller.py 保持一致）。
@@ -33,7 +41,7 @@ CONTROLLER_TYPES = {
 
 def main():
     # --- 路径设置 ---
-    current_directory = os.path.dirname(os.path.abspath(__file__))
+    current_directory = _app_directory()
     log_directory = os.path.join(current_directory, 'logs')
     os.makedirs(log_directory, exist_ok=True)
     log_file_path = os.path.join(log_directory, 'fancontroller.log')

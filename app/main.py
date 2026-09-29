@@ -29,6 +29,7 @@ from .config import load_config
 from .controller import FanController
 from .curve import build_curve_from_config
 from .ipmi import IPMIClient
+from .runtime import STATIC_DIR
 from .safety import SafetyGuard
 from .sensors import (
     BoardTemperatureReader,
@@ -43,9 +44,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-#: 前端构建产物目录（``vite build`` 的默认输出）
-STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @asynccontextmanager

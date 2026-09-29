@@ -2,6 +2,7 @@
 
 # python-ipmitool
 
+[![CI](https://github.com/chennest/python-ipmitool/actions/workflows/ci.yml/badge.svg)](https://github.com/chennest/python-ipmitool/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -124,6 +125,37 @@ python -m unittest discover -s app/tests -t . -v
 首次部署、踩坑记录、回滚与验证清单见 **[DEPLOY.md](./DEPLOY.md)**。
 最坏情况的兜底：直接向 BMC 发 `ipmitool raw 0x3a 0x01 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00`
 即可把全部风扇位交回 BMC 自动档（也可从 BMC 独立地址操作，不依赖宿主系统）。
+
+### CI 与发布（GitHub Actions）
+
+每次推送 / PR 自动执行（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）：
+
+1. **后端单测**：`python -m unittest`（Python 3.13，对齐线上）
+2. **前端构建**：`npm ci && npm run build`（自带 vue-tsc 全量类型检查）
+3. **部署包**：产出 `gpu-fan-console-app.tgz`（成员路径 `app/...`，排除 `app/data`），
+   挂在 workflow 的 Artifacts 里——下载后传到 pve02 解压重启即可，本机无需装 Node
+
+推送 main 时额外构建**双平台独立可执行文件**（PyInstaller）；打 `v*` tag 自动创建
+GitHub Release 并附上全部产物：
+
+| 产物 | 说明 |
+|---|---|
+| `gpu-fan-console-windows-x64.zip` / `gpu-fan-console-linux-x64.tar.gz` | 控制台整目录（exe + 前端 + 种子配置） |
+| `fancontroller(-once)-windows-x64.exe` / `...-linux-x64` | 旧版脚本单文件可执行 |
+| `gpu-fan-console-app.tgz` | 部署包（给已有 systemd 部署用） |
+
+发版就两条命令：
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+**可执行文件使用要点**（exe 与源码运行唯一的区别：配置 / 数据都落在 exe 旁边）：
+
+- 控制台：解压后 `gpu-fan-console` 目录里，`config.yaml`（种子配置，可直接改）、
+  `data/`（SQLite，首次启动生成）与 exe 同级；仍需系统安装 `ipmitool`，Linux 下读写
+  `/dev/ipmi0` 需要 root
+- 旧脚本：`fan_settings.yaml` 与 `logs/` 放在 exe 同目录
 
 ---
 

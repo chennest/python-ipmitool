@@ -27,10 +27,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-logger = logging.getLogger(__name__)
+from .runtime import DEFAULT_DB_PATH
 
-#: 默认数据库位置
-DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "fan-console.db"
+logger = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS fan_assignments (

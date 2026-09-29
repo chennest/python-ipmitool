@@ -11,15 +11,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+
+from .runtime import DEFAULT_CONFIG_PATH, DEFAULT_HEARTBEAT_PATH
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
-
-#: 项目根目录（``app/`` 的上一级）
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-#: 默认配置文件位置
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "app" / "config.yaml"
 
 
 class ServerConfig(BaseModel):
@@ -111,7 +107,8 @@ class SafetyConfig(BaseModel):
     """安全护栏配置。"""
 
     #: 心跳文件路径。独立看门狗据此判断主进程是否还活着。
-    heartbeat_path: str = "/run/gpu-fan-console/heartbeat"
+    #: 默认值随运行形态变化（源码/Linux 服务 = /run/...；冻结 exe = exe 旁），见 runtime.py
+    heartbeat_path: str = Field(default_factory=lambda: DEFAULT_HEARTBEAT_PATH)
     #: 退出回退动作的超时（给得宽裕一点，回退是性命攸关的事）
     restore_timeout: float = Field(default=15.0, gt=0)
     #: 超过此温度立即拉满，不再等曲线

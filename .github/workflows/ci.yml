@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+# 同一分支的新推送取消还在跑的旧流水线（tag 推送各占一个 group，互不影响）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- ① 测试 + 前端构建 + 部署包（每次推送/PR 都跑） ----------
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"   # 对齐 pve02 线上版本
+
+      - name: 后端单元测试
+        run: |
+          pip install -r app/requirements.txt
+          python -m unittest discover -s app/tests -t . -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 前端构建（含 vue-tsc 全量类型检查）
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: 确认前端产物就位
+        run: test -f app/static/index.html
+
+      # 成员路径必须是 app/...（对齐 DEPLOY.md 坑①），排除运行时数据
+      - name: 打部署包
+        run: >
+          tar czf gpu-fan-console-app.tgz
+          --exclude='__pycache__' --exclude='*.pyc' --exclude='app/data'
+          -C . app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu-fan-console-app
+          path: gpu-fan-console-app.tgz
+
+  # ---------- ② 控制台双平台可执行（PR 不跑，省 Windows 时长） ----------
+  build-console:
+    if: github.event_name != 'pull_request'
+    needs: test-and-build
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 前端产物在 ubuntu 上构建，这里从部署包里解开复用（静态资源与平台无关）
+      - uses: actions/download-artifact@v4
+        with:
+          name: gpu-fan-console-app
+      - run: tar xzf gpu-fan-console-app.tgz
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 构建控制台可执行
+        run: |
+          pip install -r app/requirements.txt pyinstaller
+          python packaging/build_console.py
+
+      - name: 打包分发（Windows → zip / Linux → tar.gz）
+        shell: bash
+        run: |
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            tar -a -cf gpu-fan-console-windows-x64.zip gpu-fan-console
+          else
+            tar czf gpu-fan-console-linux-x64.tar.gz gpu-fan-console
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu-fan-console-${{ matrix.os }}
+          path: dist/gpu-fan-console-*
+
+  # ---------- ③ 旧版脚本单文件可执行（PR 不跑） ----------
+  build-legacy:
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 构建旧脚本单文件可执行
+        run: |
+          pip install pyinstaller
+          python packaging/build_legacy.py
+
+      - name: 按平台重命名产物
+        shell: bash
+        run: |
+          cd dist
+          for f in fancontroller fancontroller_once; do
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              mv "$f.exe" "$f-windows-x64.exe"
+            else
+              mv "$f" "$f-linux-x64"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-${{ matrix.os }}
+          path: dist/fancontroller*
+
+  # ---------- ④ 打 tag（v*）自动发 Release ----------
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test-and-build, build-console, build-legacy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 发 Release 需要
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 创建 Release 并上传全部产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l artifacts
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "gpu-fan-console $GITHUB_REF_NAME" \
+            --generate-notes \
+            || gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
