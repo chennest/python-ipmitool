@@ -1,23 +1,22 @@
 """
-IPMI 风扇控制器 - 循环执行模式
+IPMI 风扇控制器 - 单次执行模式
 
-此脚本持续运行，定期监控温度并调整风扇转速。
-适合作为后台服务或 systemd 服务运行。
+此脚本执行一次温度检测和风扇调整后退出。
+适合被外部调度工具（cron、systemd timer、Windows 任务计划程序等）定时调用。
 
 使用场景：
-- 作为后台进程持续运行
-- 通过 systemd 服务管理
-- 需要实时响应温度变化的场景
+- 由 cron 或 systemd timer 每隔 N 分钟调用一次
+- 由外部监控系统触发执行
+- 集成到其他自动化工作流中
 
 优势：
-- 实时监控，响应及时
-- 保持上下文状态，避免重复初始化
-- 适合长期运行的服务器环境
+- 更灵活的调度控制
+- 便于集成到现有的任务调度系统
+- 执行失败不会影响后续调度
 """
 
 import os
 import sys
-import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import yaml
@@ -27,20 +26,13 @@ from fanController.epycd8_controller import Epycd8FanController
 
 
 def _app_directory() -> str:
-    """配置与日志所在目录。
-
-    源码运行 = 脚本目录；PyInstaller 冻结运行 = exe 所在目录
-    （onefile 模式下 ``__file__`` 指向每次启动都被清空的临时解包目录，
-    配置文件放那儿等于永远读不到用户改过的版本）。
-    """
+    """配置与日志所在目录（冻结运行时取 exe 所在目录，理由同 fancontroller.py）。"""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 
-#: 机型 → 控制器类 的映射。
-#: 配置里 ``servers[].type`` 填什么，就分发到哪个控制器 —— 新增机型时在这里
-#: 登记一行即可，下面的分发逻辑不用动。
+#: 机型 → 控制器类 的映射（与 fancontroller.py 保持一致）。
 CONTROLLER_TYPES = {
     'dell730': Dell730FanController,
     'epycd8': Epycd8FanController,
@@ -61,15 +53,13 @@ def main():
             data = yaml.safe_load(file)
     except FileNotFoundError:
         print(f"错误：配置文件 'fan_settings.yaml' 未找到。")
-        input("按任意键退出程序：")
         return
     except yaml.YAMLError as e:
         print(f"错误：配置文件格式错误，请检查配置后重新打开。\n详细信息：{e}")
-        input("按任意键退出程序：")
         return
 
     # --- 日志配置 ---
-    log_backup_count = data.get('log_backup_count', 30)  # 从配置读取日志保留天数，默认为30
+    log_backup_count = data.get('log_backup_count', 30)
     logger = logging.getLogger('FanController')
     logger.setLevel(logging.INFO)
 
@@ -88,7 +78,7 @@ def main():
     stream_handler.setLevel(logging.INFO)
 
     # 日志格式
-    formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(message)s')
     file_handler.setFormatter(formatter)
     stream_handler.setFormatter(formatter)
 
@@ -96,14 +86,13 @@ def main():
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
 
-    # --- 启动控制器（循环模式）---
-    logger.info("循环控制模式启动")
+    # --- 执行单次控制 ---
+    logger.info("单次执行模式启动")
     servers = data['servers']
     windows_ipmi_tool_path = data['windows_ipmi_tool_path']
-    interval = data['interval']
+    interval = data.get('interval', 60)  # 单次模式不使用 interval，但保留参数兼容性
     alert_config = data.get('alert', {})  # 获取告警配置
     prometheus_config = data.get('prometheus', {})  # Prometheus 数据源配置
-    threads = []
 
     for server in servers:
         controller_class = CONTROLLER_TYPES.get(server['type'])
@@ -119,16 +108,15 @@ def main():
             interval=interval,
             windows_ipmi_tool_path=windows_ipmi_tool_path,
             logger=logger,
-            auto=True,  # 循环模式
+            auto=False,  # 单次模式不需要 auto 参数
             alert_config=alert_config,
             prometheus_config=prometheus_config,
         )
-        thread = threading.Thread(target=fan_controller.start_fan_control, name=f"Thread-{server['ip']}")
-        thread.start()
-        threads.append(thread)
+        # 执行一次风扇控制
+        fan_controller.run_once()
 
-    for thread in threads:
-        thread.join()
+    logger.info("单次执行完成")
+
 
 if __name__ == '__main__':
     main()

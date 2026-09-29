@@ -1,0 +1,90 @@
+# GPU 风扇监控控制台 —— 配置
+#
+# 改完这个文件需要重启服务生效：
+#   systemctl restart gpu-fan-console
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+
+control:
+  enabled: true
+  # auto   = 按下面的 curve 自动调档（默认）
+  # manual = 只由界面手动指定占空比，控制器不插手
+  mode: auto
+  # 控制周期（秒）。15s 对机箱风扇来说绰绰有余 —— 风道热惯性远大于这个量级。
+  interval: 15
+  # 占空比变化不足这个值就不重复下发，省得每轮都去打扰 BMC
+  min_write_delta: 3
+  # 连续读不到温度多少次后开始大声报警
+  max_consecutive_failures: 3
+
+sources:
+  # GPU 指标：优先走本地 DCGM 端点（与 Prometheus 观测侧口径一致）
+  dcgm_endpoint: "http://127.0.0.1:9400/metrics"
+  # 风扇转速：优先走本地 ipmi_exporter
+  ipmi_exporter_endpoint: "http://127.0.0.1:9290/metrics"
+  ipmitool_binary: "ipmitool"
+  ipmi_timeout: 10
+  http_timeout: 5
+
+  # 远程 BMC 兜底（宿主系统起不来时排障用）。默认走本地 in-band，不配这项。
+  # ipmi_remote:
+  #   host: "192.168.6.8"
+  #   user: "admin"
+  #   password: "admin"
+
+  # --- 历史趋势（可选，只给 /api/history 用）---
+  #
+  # 实时读数**不走**这里：Prometheus 是 30s 一次 scrape，拿到的永远是快照，
+  # 而上面两个 endpoint 是直连 exporter，读的才是当下值。
+  # 但历史曲线恰恰是 Prometheus 的主场，所以单独配一套。
+  # 不配的话界面上的趋势图会显示"暂无历史数据"，其余功能不受影响。
+  prometheus_url: "http://192.168.6.31:30091"
+  prometheus_gpu_instance: "192.168.6.7:9400"    # GPU 温度  ← DCGM exporter
+  prometheus_node_instance: "192.168.6.7:9100"   # CPU 温度  ← node_exporter
+  prometheus_fan_instance: "192.168.6.7:9290"    # 风扇转速  ← ipmi_exporter
+
+curve:
+  # 滞回带（°C）：降温方向必须跌出这个带宽才降档，防止温度在阈值附近
+  # 抖动导致转速反复横跳（"直升机效应"）。
+  hysteresis: 3
+  # 占空比下限。EPYCD8 的 BMC 本身可能拒绝低于约 20% 的值，这里再兜一层。
+  min_duty: 30
+  max_duty: 100
+
+  # 温度 → 占空比。温度取该风扇位所绑定 GPU 的最大值。
+  # Tesla T10 是被动散热卡，全靠机箱风扇吹；这张曲线偏保守，
+  # 实测过温降不下来就往下压阈值。
+  points:
+    - { temp: 45, duty: 40 }
+    - { temp: 55, duty: 50 }
+    - { temp: 65, duty: 65 }
+    - { temp: 75, duty: 80 }
+    - { temp: 85, duty: 100 }
+
+# 风扇位声明（**可选，通常留空**）
+#
+# 「可分配的风扇位」是**探测出来的**：配置里写的位 ∪ ipmi_exporter 实测到
+# 有读数的位，在界面的分配面板里全部列出、由你勾选谁参与调控。
+#
+# 这里写位只有两个特殊用途（一般用不上）：
+#   ① 风扇还没读数时提前占位；② 限制定制范围。
+#
+# ⚠️ 「哪张 GPU 用哪些风扇」的分配关系更不在这里 —— 那是运行时状态，
+#    存 app/data/fan-console.db，界面上随改随生效。首次启动数据库为空 →
+#    控制器不调档，界面弹分配向导，由你亲自给每张卡挑风扇（程序不替你猜）。
+fans: []
+#  - slot: FRNT_FAN1      # 例：某个位没读数也想让它出现在清单里时才写
+#  - slot: REAR_FAN2
+
+safety:
+  # 心跳文件。独立的 systemd timer（fan-watchdog）会检查它的新鲜度 ——
+  # 这是 SIGKILL / 断电情况下唯一能救场的机制。
+  heartbeat_path: "/run/gpu-fan-console/heartbeat"
+  # 退出回退动作的超时。给得宽裕些，回退是性命攸关的事。
+  restore_timeout: 15
+  # 超过这个温度立即拉满，不再等曲线
+  emergency_temp: 85
+  # 降回这个温度以下才解除紧急状态（同样要滞回，否则在临界点反复横跳）
+  emergency_resume_temp: 75

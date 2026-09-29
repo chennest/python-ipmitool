@@ -34,60 +34,110 @@ The following models have been tested and are confirmed to work. More models are
     cd python-ipmitool
     ```
 
-3.  **Copy the template file** `fan_settings.json.template` to `fan_settings.json`.
+3.  **Install dependencies**
 
-4.  **Edit the newly created `fan_settings.json`** file. The meaning of each field is as follows. You need to configure the IP addresses and fan speeds yourself.
-
-    > Note: Only IP addresses are supported, not domain names.
-    > 
-    > Note: When adding or removing server configurations, be careful not to leave a trailing comma `}` inside the last `}` of a list, as this will cause a `json.decoder.JSONDecodeError`.
-
-    ```json
-    {
-      "auto": true, // true for automatic fan control, false for manual.
-      "interval": 60,  // The interval in seconds for checking temperature and adjusting fan speed.
-      "log_backup_count": 30, // Number of days to retain log files.
-      "windows_ipmi_tool_path": ".\\ipmitool\\ipmitool.exe",  // Path to the ipmitool executable on Windows.
-      "servers": [  // List of servers to manage.
-        {
-          "type": "dell730",  // Server type.
-          "ip": "192.168.71.90",  // Server IP address. Set to "local" if the script is running on the target machine.
-          "user": "root",  // IPMI username.
-          "password": "123123",  // IPMI password.
-          "temperature_ranges": [  // List of temperature ranges and corresponding fan speeds.
-            {
-              "min_temp": 0,  // Minimum temperature of the range (inclusive).
-              "max_temp": 60,  // Maximum temperature of the range (inclusive).
-              "fan_speeds": [20,20,20,20,20,20]  // List of fan speeds in percent for this range.
-            },
-            {
-              "min_temp": 61,
-              "max_temp": 80,
-              "fan_speeds": [25,25,25,25,25,25]
-            }
-          ]
-        }
-      ]
-    }
+    ```
+    pip install -r requirements.txt
     ```
 
-5.  **Run the Project**
+4.  **Copy the template file** `fan_settings.yaml.template` to `fan_settings.yaml`.
 
-    For long-term operation, it is recommended to run the script as a background process.
+    ```bash
+    # Linux/Mac
+    cp fan_settings.yaml.template fan_settings.yaml
 
-    1.  **On Windows**
+    # Windows
+    copy fan_settings.yaml.template fan_settings.yaml
+    ```
 
-        Use the `start /b` command to run the script in the background:
-        ```
-        start /b python fancontroller.py
-        ```
+5.  **Edit the newly created `fan_settings.yaml`** file. The meaning of each field is as follows. You need to configure the IP addresses and fan speeds yourself.
 
-    2.  **On Linux**
+    > Note: Only IP addresses are supported, not domain names.
 
-        Use `nohup` and `&` to run the script in the background and ensure it keeps running after you close the terminal:
-        ```
-nohup python3 fancontroller.py &
-        ```
+    ```yaml
+    # IPMI Fan Controller Configuration
+
+    # true for automatic fan control, false for manual
+    auto: true
+
+    # The interval in seconds for checking temperature and adjusting fan speed
+    interval: 60
+
+    # Number of days to retain log files
+    log_backup_count: 30
+
+    # Path to the ipmitool executable on Windows
+    windows_ipmi_tool_path: ".\\ipmitool\\ipmitool.exe"
+
+    # List of servers to manage
+    servers:
+      - type: dell730                    # Server type
+        ip: "192.168.71.90"              # Server IP address. Set to "local" if running on the target machine
+        user: root                       # IPMI username
+        password: "123123"               # IPMI password
+        temperature_ranges:              # List of temperature ranges and corresponding fan speeds
+          - min_temp: 0                  # Minimum temperature of the range (inclusive)
+            max_temp: 60                 # Maximum temperature of the range (inclusive)
+            fan_speeds: [20, 20, 20, 20, 20, 20]  # List of fan speeds in percent
+          - min_temp: 61
+            max_temp: 80
+            fan_speeds: [25, 25, 25, 25, 25, 25]
+    ```
+
+
+6.  **Run the Project**
+
+    The project offers two execution modes:
+
+    ## Mode 1: Loop Control Mode (Recommended for Long-term Operation)
+
+    The program continuously monitors temperature and adjusts fan speeds. Suitable for running as a background service.
+
+    **Foreground Execution (for debugging)**
+    ```bash
+    # Windows
+    python fancontroller.py
+
+    # Linux
+    python3 fancontroller.py
+    ```
+
+    **Background Execution**
+    ```bash
+    # Windows
+    start /b python fancontroller.py
+
+    # Linux
+    nohup python3 fancontroller.py &
+    ```
+
+    ## Mode 2: One-Shot Execution Mode (Recommended for External Scheduling)
+
+    Executes once and exits after temperature detection and fan adjustment. Suitable for being called by external scheduling tools like cron, systemd timer, etc.
+
+    **Direct Execution**
+    ```bash
+    # Windows
+    python fancontroller_once.py
+
+    # Linux
+    python3 fancontroller_once.py
+    ```
+
+    **Using cron for Scheduled Execution (Linux)**
+    ```bash
+    # Edit crontab
+    crontab -e
+
+    # Execute every 10 minutes
+    */10 * * * * /usr/bin/python3 /path/to/python-ipmitool/fancontroller_once.py
+    ```
+
+    **Using Windows Task Scheduler**
+    ```powershell
+    # Create a task that runs every 10 minutes
+    schtasks /create /tn "IPMI Fan Controller" /tr "python C:\path\to\python-ipmitool\fancontroller_once.py" /sc minute /mo 10
+    ```
 
 ### Setup as a systemd Service (Linux Recommended)
 
